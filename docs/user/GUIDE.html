@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SecureGen — User Guide</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --border: #1e1e2e;
+    --accent: #00e5ff;
+    --accent2: #7c3aed;
+    --text: #c9d1d9;
+    --text-dim: #586069;
+    --text-bright: #e6edf3;
+    --warn: #f59e0b;
+    --danger: #ef4444;
+    --success: #22c55e;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-weight: 300;
+    line-height: 1.7;
+    min-height: 100vh;
+  }
+
+  /* Layout */
+  .layout { display: flex; min-height: 100vh; }
+
+  /* Sidebar */
+  .sidebar {
+    width: 260px;
+    min-width: 260px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 2rem 0;
+  }
+
+  .sidebar-logo {
+    padding: 0 1.5rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 1rem;
+  }
+
+  .sidebar-logo .device-name {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    color: var(--accent);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 0.2rem;
+  }
+
+  .sidebar-logo h1 {
+    font-family: var(--mono);
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-bright);
+  }
+
+  .nav-section {
+    padding: 0.5rem 0;
+  }
+
+  .nav-label {
+    font-family: var(--mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    padding: 0.4rem 1.5rem;
+    display: block;
+  }
+
+  .nav-link {
+    display: block;
+    padding: 0.35rem 1.5rem;
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 0.85rem;
+    font-weight: 400;
+    border-left: 2px solid transparent;
+    transition: all 0.15s;
+  }
+
+  .nav-link:hover {
+    color: var(--text-bright);
+    background: rgba(0,229,255,0.04);
+    border-left-color: var(--accent);
+  }
+
+  .nav-link.active {
+    color: var(--accent);
+    border-left-color: var(--accent);
+    background: rgba(0,229,255,0.06);
+  }
+
+  /* Main content */
+  .main {
+    flex: 1;
+    max-width: 820px;
+    padding: 3rem 3.5rem;
+    overflow-x: hidden;
+  }
+
+  /* Section */
+  .section {
+    margin-bottom: 4rem;
+    scroll-margin-top: 2rem;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section-num {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    color: var(--accent);
+    background: rgba(0,229,255,0.08);
+    border: 1px solid rgba(0,229,255,0.2);
+    padding: 0.15rem 0.5rem;
+    border-radius: 2px;
+    letter-spacing: 0.05em;
+  }
+
+  h2 {
+    font-family: var(--mono);
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text-bright);
+    letter-spacing: 0.02em;
+  }
+
+  h3 {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--accent);
+    letter-spacing: 0.05em;
+    margin: 1.75rem 0 0.75rem;
+    text-transform: uppercase;
+  }
+
+  h4 {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-bright);
+    margin: 1.25rem 0 0.5rem;
+  }
+
+  p {
+    font-size: 0.9rem;
+    color: var(--text);
+    margin-bottom: 0.75rem;
+  }
+
+  /* Tables */
+  .table-wrap { overflow-x: auto; margin: 1rem 0; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+
+  th {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    text-align: left;
+    padding: 0.6rem 1rem;
+    background: rgba(255,255,255,0.02);
+    border-bottom: 1px solid var(--border);
+  }
+
+  td {
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    color: var(--text);
+    vertical-align: top;
+  }
+
+  tr:last-child td { border-bottom: none; }
+
+  td:first-child {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--text-bright);
+    white-space: nowrap;
+  }
+
+  /* Key badge */
+  .key {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-bottom: 2px solid rgba(255,255,255,0.15);
+    padding: 0.1rem 0.45rem;
+    border-radius: 3px;
+    color: var(--text-bright);
+    white-space: nowrap;
+  }
+
+  /* Callouts */
+  .callout {
+    border-left: 3px solid;
+    padding: 0.75rem 1rem;
+    margin: 1rem 0;
+    border-radius: 0 4px 4px 0;
+    font-size: 0.85rem;
+  }
+
+  .callout-warn {
+    border-color: var(--warn);
+    background: rgba(245,158,11,0.06);
+    color: #fcd34d;
+  }
+
+  .callout-info {
+    border-color: var(--accent);
+    background: rgba(0,229,255,0.05);
+    color: #67e8f9;
+  }
+
+  .callout-danger {
+    border-color: var(--danger);
+    background: rgba(239,68,68,0.06);
+    color: #fca5a5;
+  }
+
+  .callout strong {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 0.25rem;
+    opacity: 0.8;
+  }
+
+  /* Mode cards */
+  .mode-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin: 1rem 0;
+  }
+
+  .mode-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem;
+  }
+
+  .mode-card .mode-title {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-bright);
+    letter-spacing: 0.05em;
+    margin-bottom: 0.25rem;
+  }
+
+  .mode-card .mode-trigger {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .mode-card ul {
+    list-style: none;
+    font-size: 0.8rem;
+  }
+
+  .mode-card li {
+    padding: 0.15rem 0;
+    color: var(--text);
+  }
+
+  .mode-card li::before {
+    content: '✓ ';
+    color: var(--success);
+    font-family: var(--mono);
+  }
+
+  .mode-card li.no::before {
+    content: '✗ ';
+    color: var(--text-dim);
+  }
+
+  .mode-card li.no { color: var(--text-dim); }
+
+  /* Steps */
+  .steps { list-style: none; counter-reset: step; margin: 0.75rem 0; }
+
+  .steps li {
+    counter-increment: step;
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    padding: 0.5rem 0;
+    font-size: 0.88rem;
+  }
+
+  .steps li::before {
+    content: counter(step);
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: rgba(0,229,255,0.1);
+    border: 1px solid rgba(0,229,255,0.25);
+    min-width: 1.5rem;
+    height: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 2px;
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+  }
+
+  /* Inline code */
+  code {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--border);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    color: var(--accent);
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { padding: 2rem 1.5rem; }
+    .mode-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <span class="device-name">ESP32 T-Display</span>
+      <h1>SecureGen</h1>
+    </div>
+    <div class="nav-section">
+      <span class="nav-label">Device</span>
+      <a href="#buttons" class="nav-link">Buttons</a>
+      <a href="#first-boot" class="nav-link">First Boot</a>
+      <a href="#modes" class="nav-link">Operating Modes</a>
+      <a href="#navigation" class="nav-link">Navigation</a>
+      <a href="#ble" class="nav-link">BLE Transfer</a>
+      <a href="#factory-reset" class="nav-link">Factory Reset</a>
+    </div>
+    <div class="nav-section">
+      <span class="nav-label">Web Cabinet</span>
+      <a href="#web-access" class="nav-link">Access & Login</a>
+      <a href="#keys" class="nav-link">Keys (TOTP / HOTP)</a>
+      <a href="#passwords" class="nav-link">Passwords</a>
+      <a href="#display" class="nav-link">Display</a>
+      <a href="#pin" class="nav-link">PIN Settings</a>
+      <a href="#settings" class="nav-link">Settings</a>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <main class="main">
+
+    <!-- BUTTONS -->
+    <div class="section" id="buttons">
+      <div class="section-header">
+        <span class="section-num">01</span>
+        <h2>Buttons</h2>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Button</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="key">▲ Top</span></td><td>Navigate up / increment digit</td></tr>
+            <tr><td><span class="key">▼ Bottom</span></td><td>Navigate down / next digit</td></tr>
+            <tr><td><span class="key">RST</span></td><td>Hardware reboot — same as power cycling the device</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- FIRST BOOT -->
+    <div class="section" id="first-boot">
+      <div class="section-header">
+        <span class="section-num">02</span>
+        <h2>First Boot</h2>
+      </div>
+
+      <h3>Step 1 — Create PIN</h3>
+      <p>On first power-on the device prompts you to create a PIN code. This PIN encrypts the master device key — it is required on every startup.</p>
+
+      <h3>Step 2 — Connect to WiFi</h3>
+      <p>After PIN creation the device starts an Access Point. Connect to it from your phone or computer. A captive portal opens automatically — select your WiFi network and enter the password. The device reboots after saving.</p>
+      <div class="callout callout-info">
+        <strong>Note</strong>
+        WiFi can also be configured later through the web cabinet in AP mode, before the automatic WiFi setup runs.
+      </div>
+
+      <h3>Step 3 — Web cabinet starts automatically</h3>
+      <p>On first boot after WiFi setup, the web server starts automatically. Enter the device IP or mDNS address in your browser to complete registration.</p>
+    </div>
+
+    <!-- MODES -->
+    <div class="section" id="modes">
+      <div class="section-header">
+        <span class="section-num">03</span>
+        <h2>Operating Modes</h2>
+      </div>
+
+      <p>After entering the PIN on every boot, you have a few seconds to select a mode by pressing a button. If nothing is pressed, WiFi mode starts automatically.</p>
+
+      <div class="mode-grid">
+        <div class="mode-card">
+          <div class="mode-title">AP Mode</div>
+          <div class="mode-trigger">Press <span class="key">▲ Top</span></div>
+          <ul>
+            <li>Passwords</li>
+            <li>HOTP codes</li>
+            <li>Web cabinet</li>
+            <li>BLE transfer</li>
+            <li class="no">TOTP codes</li>
+          </ul>
+        </div>
+        <div class="mode-card">
+          <div class="mode-title">Offline Mode</div>
+          <div class="mode-trigger">Press <span class="key">▼ Bottom</span></div>
+          <ul>
+            <li>Passwords</li>
+            <li>HOTP codes</li>
+            <li>BLE transfer</li>
+            <li class="no">TOTP codes</li>
+            <li class="no">Web cabinet</li>
+          </ul>
+        </div>
+        <div class="mode-card">
+          <div class="mode-title">WiFi Mode</div>
+          <div class="mode-trigger">No button — auto</div>
+          <ul>
+            <li>Passwords</li>
+            <li>HOTP codes</li>
+            <li>TOTP codes</li>
+            <li>Web cabinet (opt.)</li>
+            <li>BLE (no web server)</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>WiFi Mode — Web Server</h3>
+      <p>After connecting to WiFi and syncing time via NTP, the device asks: <strong>enable web server?</strong></p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>State</th><th>Available</th></tr></thead>
+          <tbody>
+            <tr><td>Web server OFF</td><td>TOTP, HOTP, passwords, BLE transfer</td></tr>
+            <tr><td>Web server ON</td><td>TOTP, HOTP, passwords, web cabinet — BLE transfer disabled</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- NAVIGATION -->
+    <div class="section" id="navigation">
+      <div class="section-header">
+        <span class="section-num">04</span>
+        <h2>Device Navigation</h2>
+      </div>
+
+      <h3>PIN Entry Screen</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Action</th><th>Result</th></tr></thead>
+          <tbody>
+            <tr><td><span class="key">▲ Top</span></td><td>Increment current digit</td></tr>
+            <tr><td><span class="key">▼ Bottom</span></td><td>Move to next digit</td></tr>
+            <tr><td>Double press <span class="key">▼ Bottom</span></td><td>Go back one digit</td></tr>
+            <tr><td>Hold both buttons</td><td>Power off device</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>TOTP / HOTP Screen</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Action</th><th>Result</th></tr></thead>
+          <tbody>
+            <tr><td><span class="key">▲ Top</span></td><td>Previous key</td></tr>
+            <tr><td><span class="key">▼ Bottom</span></td><td>Next key</td></tr>
+            <tr><td>Hold both (on HOTP)</td><td>Advance counter — get next HOTP code</td></tr>
+            <tr><td>Hold both (on TOTP)</td><td>No action</td></tr>
+            <tr><td>Hold <span class="key">▲ Top</span> 5 sec</td><td>Switch to password manager</td></tr>
+            <tr><td>Hold <span class="key">▼ Bottom</span></td><td>Shutdown</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Password Manager Screen</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Action</th><th>Result</th></tr></thead>
+          <tbody>
+            <tr><td><span class="key">▲ Top</span></td><td>Previous password</td></tr>
+            <tr><td><span class="key">▼ Bottom</span></td><td>Next password</td></tr>
+            <tr><td>Hold both buttons</td><td>Start BLE transfer</td></tr>
+            <tr><td>Hold <span class="key">▲ Top</span> 5 sec</td><td>Switch back to TOTP / HOTP</td></tr>
+            <tr><td>Hold <span class="key">▼ Bottom</span></td><td>Shutdown</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- BLE -->
+    <div class="section" id="ble">
+      <div class="section-header">
+        <span class="section-num">05</span>
+        <h2>BLE Password Transfer</h2>
+      </div>
+
+      <p>BLE transfer works without any app — the device acts as a Bluetooth HID keyboard and types the password directly.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Mode</th><th>BLE Available</th></tr></thead>
+          <tbody>
+            <tr><td>Offline</td><td>✓ Yes</td></tr>
+            <tr><td>AP</td><td>✓ Yes</td></tr>
+            <tr><td>WiFi — web server OFF</td><td>✓ Yes</td></tr>
+            <tr><td>WiFi — web server ON</td><td>✗ No</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>First Connection (Bonding)</h3>
+      <ol class="steps">
+        <li>In the password manager screen, hold both buttons</li>
+        <li>A PIN code appears on the device display</li>
+        <li>On your phone, select the device in Bluetooth settings and enter that PIN</li>
+        <li>Bonding is saved — next time no PIN is needed</li>
+      </ol>
+
+      <h3>Sending a Password</h3>
+      <ol class="steps">
+        <li>Navigate to the desired password using <span class="key">▲</span> / <span class="key">▼</span></li>
+        <li>The password is transmitted to the phone as keyboard input</li>
+        <li>Press <span class="key">▲ Top</span> to exit BLE and return to passwords</li>
+      </ol>
+
+      <div class="callout callout-info">
+        <strong>Note</strong>
+        If a hardware BLE PIN is configured, the device will ask you to confirm it on-screen before transmitting.
+      </div>
+    </div>
+
+    <!-- FACTORY RESET -->
+    <div class="section" id="factory-reset">
+      <div class="section-header">
+        <span class="section-num">06</span>
+        <h2>Factory Reset</h2>
+      </div>
+
+      <ol class="steps">
+        <li>Press <span class="key">RST</span></li>
+        <li>Immediately after reboot — hold both buttons simultaneously</li>
+      </ol>
+
+      <div class="callout callout-danger">
+        <strong>Warning</strong>
+        Factory reset permanently deletes all TOTP/HOTP keys, passwords, WiFi credentials, sessions, and PIN. Export your data before resetting if you need to restore it.
+      </div>
+    </div>
+
+    <!-- WEB ACCESS -->
+    <div class="section" id="web-access">
+      <div class="section-header">
+        <span class="section-num">07</span>
+        <h2>Web Cabinet — Access & Login</h2>
+      </div>
+
+      <h3>How to Open</h3>
+      <p>Open the device IP address in your browser, or use the mDNS address: <code>http://t-disp-totp.local</code> (hostname configurable in Settings).</p>
+      <p>In AP mode a captive portal opens automatically when you connect to the device's WiFi network.</p>
+
+      <h3>Registration</h3>
+      <p>On first access the device redirects to the registration page. Create a username and password, then log in with the same credentials.</p>
+
+      <div class="callout callout-warn">
+        <strong>Known Bug</strong>
+        The registration or login page may appear blank on first load. Refresh the page and it will display correctly.
+      </div>
+
+      <div class="callout callout-danger">
+        <strong>Login Attempts</strong>
+        Multiple failed login attempts will lock access until the device is rebooted.
+      </div>
+    </div>
+
+    <!-- KEYS -->
+    <div class="section" id="keys">
+      <div class="section-header">
+        <span class="section-num">08</span>
+        <h2>Keys — TOTP &amp; HOTP</h2>
+      </div>
+
+      <h3>Adding a Key</h3>
+      <p>Enter a name and the secret key. Default settings: TOTP, SHA1, 6 digits, 30 second interval.</p>
+      <p>Click <strong>Additional Settings</strong> to change:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Parameter</th><th>Options</th></tr></thead>
+          <tbody>
+            <tr><td>Type</td><td>TOTP, HOTP</td></tr>
+            <tr><td>Algorithm</td><td>SHA1, SHA256, SHA512</td></tr>
+            <tr><td>Code length</td><td>6 or 8 digits</td></tr>
+            <tr><td>TOTP interval</td><td>30 or 60 seconds</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>You can also add a key by uploading a screenshot of its QR code.</p>
+
+      <h3>Key Actions</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Action</th><th>Result</th></tr></thead>
+          <tbody>
+            <tr><td>Tap the code</td><td>Copy code to clipboard</td></tr>
+            <tr><td>QR button</td><td>Display QR code on device screen for 30 seconds — scan to export to another authenticator app</td></tr>
+            <tr><td>Next (HOTP only)</td><td>Advance counter and generate next code</td></tr>
+            <tr><td>Delete</td><td>Remove key permanently</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout-info">
+        <strong>Scanning the QR</strong>
+        The device screen is small. Enable your phone's flashlight and zoom in for a cleaner scan.
+      </div>
+
+      <h3>Export &amp; Import</h3>
+      <ol class="steps">
+        <li>Click <strong>Activate Export</strong> and enter your web cabinet password</li>
+        <li>Select the keys to export and click <strong>Export</strong> — a <code>.enc</code> file downloads</li>
+        <li>To import: activate export again, click <strong>Import</strong>, upload the <code>.enc</code> file</li>
+      </ol>
+      <p>The <code>.enc</code> file can also be opened in <code>decrypt_export.html</code> (project root) — an offline editor for viewing, decrypting, and editing keys on your computer.</p>
+    </div>
+
+    <!-- PASSWORDS -->
+    <div class="section" id="passwords">
+      <div class="section-header">
+        <span class="section-num">09</span>
+        <h2>Passwords</h2>
+      </div>
+
+      <h3>Adding a Password</h3>
+      <p>Enter a name and password. Use the generator icon to create one:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Control</th><th>Function</th></tr></thead>
+          <tbody>
+            <tr><td>Slider</td><td>Password length: 1 – 64 characters</td></tr>
+            <tr><td>Regenerate</td><td>Generate a new random password</td></tr>
+            <tr><td>Save</td><td>Copy generated password into the input field</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Click <strong>Save Password</strong> to add it to the list.</p>
+
+      <h3>Password Actions</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Button</th><th>Action</th></tr></thead>
+          <tbody>
+            <tr><td>Copy</td><td>Securely fetch password from device and copy to clipboard</td></tr>
+            <tr><td>Edit</td><td>Open edit form — change name or password and save</td></tr>
+            <tr><td>Remove</td><td>Delete password permanently</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Export &amp; Import</h3>
+      <p>Works identically to key export — activate, enter password, download <code>.enc</code> file. Compatible with <code>decrypt_export.html</code>.</p>
+    </div>
+
+    <!-- DISPLAY -->
+    <div class="section" id="display">
+      <div class="section-header">
+        <span class="section-num">10</span>
+        <h2>Display Settings</h2>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Setting</th><th>Options</th></tr></thead>
+          <tbody>
+            <tr><td>Theme</td><td>Light, Dark</td></tr>
+            <tr><td>Timezone</td><td>Used for the clock widget shown on device screen</td></tr>
+            <tr><td>Splash screen</td><td>Image shown on boot: SecureGen (original), Blade Runner 2044, Combs</td></tr>
+            <tr><td>Screen timeout</td><td>Time until screen turns off automatically</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Each setting has its own Save button.</p>
+    </div>
+
+    <!-- PIN -->
+    <div class="section" id="pin">
+      <div class="section-header">
+        <span class="section-num">11</span>
+        <h2>PIN Settings</h2>
+      </div>
+
+      <h3>Device PIN (Startup Encryption)</h3>
+      <p>Controls the PIN requested on every boot. This PIN encrypts the master device key — all stored data depends on it. Enabled by default, created on first boot.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>State</th><th>Effect</th></tr></thead>
+          <tbody>
+            <tr><td>Enabled</td><td>PIN required on startup. Master key encrypted on disk.</td></tr>
+            <tr><td>Disabled</td><td>No PIN on startup. Master key stored unencrypted — if the device is stolen, data can be extracted.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout-danger">
+        <strong>Important</strong>
+        Once disabled, the master key cannot be re-encrypted without a Factory Reset. A reset requires re-importing all keys and passwords from backups.
+      </div>
+
+      <h3>BLE Bonding PIN</h3>
+      <p>The PIN entered on your phone during first Bluetooth pairing. Generated randomly on first boot. Can be changed and saved here.</p>
+
+      <h3>BLE Hardware Confirmation PIN</h3>
+      <p>An additional PIN prompted on the device itself before any BLE password transfer. Prevents unauthorized transfers if someone else has access to the device.</p>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="section" id="settings">
+      <div class="section-header">
+        <span class="section-num">12</span>
+        <h2>Settings</h2>
+      </div>
+
+      <h3>Change Web Cabinet Password</h3>
+      <p>Requirements: minimum 8 characters, uppercase letter, lowercase letter, number, special character (<code>!@#$%</code>).</p>
+
+      <h3>Change AP Password</h3>
+      <p>Password for the device's own WiFi access point.</p>
+
+      <h3>Bluetooth</h3>
+      <p>BLE device name — maximum 15 characters. This is the name visible when pairing.</p>
+
+      <h3>mDNS</h3>
+      <p>Hostname for local network access. After saving, the device is reachable at <code>http://&lt;hostname&gt;.local</code>.</p>
+
+      <h3>Startup Mode</h3>
+      <p>Default screen on boot: TOTP/HOTP view or password manager.</p>
+
+      <h3>Web Server Auto-Shutdown</h3>
+      <p>Automatically stops the web server after inactivity: 5 min, 10 min, 1 hour, or never.</p>
+
+      <h3>Auto-Logout Timer</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Option</th><th>Behaviour</th></tr></thead>
+          <tbody>
+            <tr><td>Until reboot</td><td>Session ends on every device reboot — fresh login required</td></tr>
+            <tr><td>1 hour / 6 hours / 24 hours / 3 days</td><td>Session persists across reboots for the selected duration</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Device Controls</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Button</th><th>Action</th></tr></thead>
+          <tbody>
+            <tr><td>Reboot</td><td>Restart the device</td></tr>
+            <tr><td>Reboot with web server</td><td>Restart and automatically enable the web server on next boot</td></tr>
+            <tr><td>Clear BLE clients</td><td>Remove all saved Bluetooth bondings</td></tr>
+            <tr><td>Logout</td><td>End current web cabinet session</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+  // Active nav highlighting on scroll
+  const sections = document.querySelectorAll('.section');
+  const links = document.querySelectorAll('.nav-link');
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const active = document.querySelector(`.nav-link[href="#${entry.target.id}"]`);
+        if (active) active.classList.add('active');
+      }
+    });
+  }, { threshold: 0.3 });
+
+  sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>

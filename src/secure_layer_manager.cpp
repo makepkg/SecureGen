@@ -137,15 +137,11 @@ bool SecureLayerManager::processKeyExchange(const String& clientId, const String
     session->rxCounter = 0;
     session->txCounter = 0;
     
-    // Prepare response with server public key AND ENCRYPTED session key
+    // Prepare response with server public key AND salt (for HKDF)
     String serverPubKey = getServerPublicKey();
-    String sessionKeyHex = bytesToHex(session->sessionKey, SECURE_AES_KEY_SIZE);
+    String saltHex = bytesToHex(session->clientNonce, 16);
     
-    // Шифруем sessionKey статическим ключом для безопасной передачи
-    String staticKey = "SecureStaticKey2024!"; // 20 chars = 160 bits
-    String encryptedSessionKey = simpleXorEncrypt(sessionKeyHex, staticKey);
-    
-    response = "{\"type\":\"keyexchange\",\"status\":\"success\",\"pubkey\":\"" + serverPubKey + "\",\"encryptedSessionKey\":\"" + encryptedSessionKey + "\"}";
+    response = "{\"type\":\"keyexchange\",\"status\":\"success\",\"pubkey\":\"" + serverPubKey + "\",\"salt\":\"" + saltHex + "\"}";
     
     LOG_INFO("🔐", "KeyExchange OK: " + clientId.substring(0,8) + "... [Sessions:" + String(sessions.size()) + "]");
     return true;
@@ -265,17 +261,15 @@ IRAM_ATTR bool SecureLayerManager::encryptResponse(const String& clientId, const
     uint8_t tag[SECURE_GCM_TAG_SIZE];
     size_t ciphertextLen;
     
-    // XOR шифрование для совместимости с JavaScript SimpleCrypto
-    // Алгоритм: data XOR key XOR iv
+    // AES-256-GCM encryption via mbedTLS
     generateNonce(iv, SECURE_GCM_IV_SIZE);
-    generateNonce(tag, SECURE_GCM_TAG_SIZE);
     
-    for (size_t i = 0; i < plaintextLen; i++) {
-        ciphertext[i] = plaintextBytes[i] ^ session->sessionKey[i % SECURE_AES_KEY_SIZE] ^ iv[i % SECURE_GCM_IV_SIZE];
+    bool success = encryptData(session->sessionKey, plaintextBytes, plaintextLen,
+                              ciphertext, &ciphertextLen, iv, tag);
+    
+    if (!success) {
+        LOG_ERROR("SecureLayerManager", "AES-GCM encryption failed");
     }
-    ciphertextLen = plaintextLen;
-    
-    bool success = true; // XOR всегда успешен
     
     if (success) {
         // Build JSON response
@@ -349,15 +343,19 @@ IRAM_ATTR bool SecureLayerManager::decryptRequest(const String& clientId, const 
         return false;
     }
     
-    // 🔐 XOR Decrypt (matching client implementation)
+    // AES-256-GCM decryption with tag authentication via mbedTLS
     uint8_t* decryptedBytes = new uint8_t[dataLen + 1];
-    bool success = true;
+    size_t decryptedLen = 0;
     
-    // XOR decryption: data ^ sessionKey ^ IV (same as client encryption)
-    for (size_t i = 0; i < dataLen; i++) {
-        decryptedBytes[i] = ciphertext[i] ^ session->sessionKey[i % SECURE_AES_KEY_SIZE] ^ iv[i % SECURE_GCM_IV_SIZE];
+    bool success = decryptData(session->sessionKey, ciphertext, dataLen,
+                              iv, tag, decryptedBytes, &decryptedLen);
+    
+    if (success) {
+        decryptedBytes[decryptedLen] = '\0';
+    } else {
+        LOG_ERROR("SecureLayerManager", "AES-GCM auth failed - tag mismatch or tampering");
+        decryptedBytes[0] = '\0';
     }
-    decryptedBytes[dataLen] = '\0';
     
     plaintext = String((char*)decryptedBytes);
     session->lastActivity = millis();
@@ -525,9 +523,7 @@ SecureLayerManager::SecureSession* SecureLayerManager::createSession(const Strin
     session.lastActivity = millis();
     
     // Generate deterministic client nonce from clientId for reproducible keys
-    memset(session.clientNonce, 0, 16);
-    size_t copyLen = min((size_t)clientId.length(), (size_t)16);
-    memcpy(session.clientNonce, clientId.c_str(), copyLen);
+    generateNonce(session.clientNonce, 16);
     
     sessions[clientId] = session;
     LOG_DEBUG("🔐", "Session created: " + clientId.substring(0,8) + "... [Total:" + String(sessions.size()) + "]");
@@ -631,14 +627,12 @@ bool SecureLayerManager::generateNonce(uint8_t* nonce, size_t length) {
     return mbedtls_ctr_drbg_random(&ctr_drbg, nonce, length) == 0;
 }
 
-// Простое XOR шифрование для статических данных
-String SecureLayerManager::simpleXorEncrypt(const String& data, const String& key) {
-    String result = "";
-    for (size_t i = 0; i < data.length(); i++) {
-        char encrypted = data[i] ^ key[i % key.length()];
-        // Конвертируем в hex с padding
-        if (encrypted < 16) result += "0";
-        result += String(encrypted, HEX);
+void SecureLayerManager::wipeAllSessions() {
+    for (auto& pair : sessions) {
+        memset(pair.second.sessionKey, 0, SECURE_AES_KEY_SIZE);
+        memset(pair.second.clientNonce, 0, 16);
     }
-    return result;
+    sessions.clear();
+    mbedtls_ecdh_free(&ecdh_context);
+    initialized = false;
 }

@@ -1,0 +1,54 @@
+# Board environment name (lilygo-t-display) must match the [env:] name in platformio.ini
+# Check with: grep "\[env:" platformio.ini
+
+name: Build and Release Firmware
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: platformio-${{ hashFiles('platformio.ini') }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO and esptool
+        run: pip install platformio esptool
+
+      - name: Build firmware
+        run: pio run
+
+      - name: Merge binaries into single file
+        run: |
+          esptool.py --chip esp32 merge_bin \
+            -o merged-firmware.bin \
+            --flash_mode qout \
+            --flash_freq 80m \
+            --flash_size 4MB \
+            0x1000 .pio/build/lilygo-t-display/bootloader.bin \
+            0x8000 .pio/build/lilygo-t-display/partitions.bin \
+            0x10000 .pio/build/lilygo-t-display/firmware.bin
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            merged-firmware.bin
+            .pio/build/lilygo-t-display/bootloader.bin
+            .pio/build/lilygo-t-display/partitions.bin
+            .pio/build/lilygo-t-display/firmware.bin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

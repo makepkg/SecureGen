@@ -2,6 +2,7 @@
 #define WIFI_MANAGER_H
 
 #include <Arduino.h>
+#include <DNSServer.h>
 #include "display_manager.h"
 #include "config_manager.h"
 
@@ -20,6 +21,8 @@ public:
     // Обновление mDNS имени хоста
     void updateMdnsHostname();
     void startMdnsService();
+    void startDns();
+    void processDnsRequests();
     
     // 🔒 Сохранение зашифрованных WiFi credentials (public для Web API)
     bool saveCredentials(const String& ssid, const String& password);
@@ -30,6 +33,7 @@ private:
     DisplayManager& _display;
     ConfigManager& _configManager;
     String _ipAddress;
+    DNSServer _dnsServer;
 };
 
 #endif // WIFI_MANAGER_H

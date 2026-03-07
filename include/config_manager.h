@@ -48,6 +48,9 @@ public:
     uint16_t getDisplayTimeout();
     bool saveDisplayTimeout(uint16_t timeout);
 
+    String getTimezone();
+    bool saveTimezone(const String& tz);
+
     // WiFi AP Password functions
     String loadApPassword();  // Загрузить пароль AP режима (default: "12345678", AES-256 encrypted)
     bool saveApPassword(const String& password);  // Сохранить пароль AP режима

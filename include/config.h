@@ -39,6 +39,7 @@
 
 // --- PIN Settings ---
 #define PIN_FILE "/pin_config.json"
+#define PIN_ATTEMPTS_FILE "/.pin_attempts"
 #define DEFAULT_PIN_LENGTH 6
 
 // --- General Config ---
@@ -69,8 +70,9 @@
 // 
 // Выбраны максимальные значения, которые НЕ блокируют async tasks:
 
-#define PBKDF2_ITERATIONS_LOGIN 10000        // Для hashPassword/verifyPassword (~2s, безопасно)
-#define PBKDF2_ITERATIONS_EXPORT 15000       // Для encryptWithPassword/decryptWithPassword (~3s, редко)
+#define PBKDF2_ITERATIONS_PIN 25000      // device key unlock, once per boot (~2.7s)
+#define PBKDF2_ITERATIONS_LOGIN 25000    // web login, each authentication
+#define PBKDF2_ITERATIONS_EXPORT 15000   // import/export, rare operation (~1.6s)
 
 // Производительность на ESP32 @ 240MHz (реальные измерения):
 // 10,000 iterations  ≈ 2 секунды (приемлемо для login, не блокирует watchdog)

@@ -204,18 +204,17 @@ const char login_html[] PROGMEM = R"rawliteral(
         document.addEventListener('DOMContentLoaded', async function() {
             // 🔗 ЗАГРУЖАЕМ URL OBFUSCATION MAPPINGS
             try {
-                console.log('🔗 Loading URL obfuscation mappings for login...');
-                const response = await fetch('/api/url_obfuscation/mappings');
+                const response = await fetch('/api/client/config');
                 if (response.ok) {
-                    const mappings = await response.json();
-                    window.urlObfuscationMap = mappings;
-                    console.log(`🔗 Loaded ${Object.keys(mappings).length} URL mappings`);
+                    const cfg = await response.json();
+                    window.urlObfuscationMap = {};
+                    if (cfg.k) window.urlObfuscationMap['/api/secure/keyexchange'] = cfg.k;
+                    if (cfg.t) window.urlObfuscationMap['/api/tunnel'] = cfg.t;
+                    if (cfg.l) window.urlObfuscationMap['/login'] = cfg.l;
                 } else {
-                    console.warn('⚠️ Failed to load URL mappings, using direct URLs');
                     window.urlObfuscationMap = {};
                 }
             } catch (error) {
-                console.warn('⚠️ Error loading URL mappings:', error.message);
                 window.urlObfuscationMap = {};
             }
             

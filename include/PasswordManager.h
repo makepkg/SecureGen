@@ -23,6 +23,9 @@ public:
     std::vector<PasswordEntry> getAllPasswords();
     std::vector<PasswordEntry> getAllPasswordsForExport();
     bool replaceAllPasswords(const String& jsonContent); // Новая функция для импорта
+    
+    // Wipe passwords from memory
+    void wipePasswords();
 
 private:
     bool loadPasswords();

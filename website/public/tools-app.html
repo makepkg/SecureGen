@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Decrypt Export — T-Disp TOTP</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0f1117; --surface: #1a1d2e; --surface2: #252840;
+    --border: #2e3155; --accent: #5b6af5; --accent2: #7c8dff;
+    --text: #e8eaf6; --text2: #9099c8;
+    --danger: #f55b5b; --success: #5bf5a0; --warn: #f5c55b;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 2rem 1rem; }
+  .logo { font-size: 1.5rem; font-weight: 700; color: var(--accent2); margin-bottom: 0.25rem; letter-spacing: 1px; }
+  .subtitle { color: var(--text2); font-size: 0.85rem; margin-bottom: 2rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 2rem; width: 100%; max-width: 520px; margin-bottom: 1.5rem; }
+  #dropzone { border: 2px dashed var(--border); border-radius: 10px; padding: 2.5rem 1rem; text-align: center; cursor: pointer; transition: border-color 0.2s, background 0.2s; user-select: none; }
+  #dropzone:hover, #dropzone.over { border-color: var(--accent); background: rgba(91,106,245,0.07); }
+  #dropzone .icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
+  #dropzone p { color: var(--text2); font-size: 0.9rem; }
+  #dropzone p span { color: var(--accent2); text-decoration: underline; }
+  #fileInput { display: none; }
+  #filename { margin-top: 0.75rem; font-size: 0.82rem; color: var(--success); min-height: 1.2em; text-align: center; }
+  .field-label { display: block; font-size: 0.8rem; color: var(--text2); margin: 1.25rem 0 0.4rem; letter-spacing: 0.5px; text-transform: uppercase; }
+  .pw-wrap { position: relative; display: flex; align-items: center; }
+  .pw-wrap input { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 0.65rem 2.8rem 0.65rem 0.9rem; color: var(--text); font-size: 1rem; outline: none; transition: border-color 0.2s; }
+  .pw-wrap input:focus { border-color: var(--accent); }
+  .pw-wrap input::placeholder { color: var(--text2); }
+  .pw-toggle { position: absolute; right: 0.7rem; background: none; border: none; cursor: pointer; font-size: 1.1rem; color: var(--text2); padding: 0.2rem; }
+  .hint { font-size: 0.76rem; color: var(--text2); margin-top: 0.35rem; }
+  .btn { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.65rem 1.4rem; border-radius: 8px; border: none; cursor: pointer; font-size: 0.9rem; font-weight: 600; transition: opacity 0.15s, transform 0.1s; }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { background: var(--accent); color: #fff; width: 100%; justify-content: center; margin-top: 1.25rem; }
+  .btn-primary:hover { opacity: 0.88; }
+  .btn-sm { background: var(--surface2); color: var(--text2); font-size: 0.8rem; padding: 0.4rem 0.9rem; border: 1px solid var(--border); border-radius: 7px; }
+  .btn-sm:hover { color: var(--text); border-color: var(--accent2); }
+  .btn-encrypt { background: #1e3a2e; color: var(--success); border: 1px solid #2e6a4e; font-size: 0.8rem; padding: 0.4rem 0.9rem; border-radius: 7px; }
+  .btn-encrypt:hover { background: #254a3a; }
+  #status { min-height: 1.4em; font-size: 0.85rem; text-align: center; margin-top: 0.9rem; font-weight: 500; }
+  #status.error { color: var(--danger); } #status.ok { color: var(--success); } #status.loading { color: var(--warn); }
+  #results { display: none; width: 100%; max-width: 860px; }
+  .results-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem; }
+  .results-title { font-size: 1rem; font-weight: 600; color: var(--accent2); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .results-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .table-wrap { overflow-x: auto; border-radius: 10px; border: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+  thead { background: var(--surface2); }
+  th { padding: 0.7rem 0.9rem; text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text2); border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 0.45rem 0.6rem; border-bottom: 1px solid rgba(46,49,85,0.5); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  .cell-edit { background: transparent; border: 1px solid transparent; border-radius: 5px; padding: 4px 7px; color: var(--text); font-size: 0.875rem; font-family: inherit; width: 100%; min-width: 90px; outline: none; transition: border-color 0.15s, background 0.15s; }
+  .cell-edit:focus { border-color: var(--accent); background: var(--surface2); }
+  .cell-edit.mono { font-family: 'Courier New', monospace; color: var(--accent2); }
+  select.cell-edit { cursor: pointer; min-width: 80px; }
+  select.cell-edit option { background: var(--surface); color: var(--text); }
+  input[type="number"].cell-edit { min-width: 70px; }
+  .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; margin-left: 4px; }
+  .badge-hotp { background: rgba(245,197,91,0.2); color: var(--warn); }
+  .badge-sha256 { background: rgba(91,245,160,0.2); color: var(--success); }
+  .badge-sha512 { background: rgba(91,106,245,0.2); color: var(--accent2); }
+  .badge-8digit { background: rgba(245,91,91,0.2); color: var(--danger); }
+  .pw-cell-wrap { display: flex; align-items: center; gap: 4px; }
+  .pw-input { background: transparent; border: 1px solid transparent; border-radius: 5px; padding: 4px 7px; color: var(--text); font-size: 0.875rem; font-family: 'Courier New', monospace; width: 100%; min-width: 120px; outline: none; transition: border-color 0.15s, background 0.15s; }
+  .pw-input:focus { border-color: var(--accent); background: var(--surface2); }
+  .reveal-btn { background: none; border: none; cursor: pointer; color: var(--text2); font-size: 0.85rem; padding: 3px 5px; border-radius: 4px; flex-shrink: 0; }
+  .reveal-btn:hover { color: var(--accent2); background: var(--surface2); }
+  .copy-btn { background: none; border: none; cursor: pointer; color: var(--text2); font-size: 0.85rem; padding: 3px 8px; border-radius: 5px; }
+  .copy-btn:hover { color: var(--accent2); background: var(--surface2); }
+  .num-col { color: var(--text2); font-size: 0.78rem; width: 32px; text-align: center; }
+  .security-note { margin-top: 2rem; text-align: center; font-size: 0.76rem; color: var(--text2); opacity: 0.7; }
+  .security-note span { color: var(--success); }
+  .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); align-items: center; justify-content: center; }
+  .modal.show { display: flex; }
+  .modal-content { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 2rem; width: 90%; max-width: 480px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); animation: modalSlide 0.2s ease-out; }
+  @keyframes modalSlide { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+  .modal h3 { font-size: 1.1rem; }
+  #modalStatus.error, #createModalStatus.error { color: var(--danger); font-weight: 500; }
+  #modalStatus.ok, #createModalStatus.ok { color: var(--success); font-weight: 500; }
+</style>
+</head>
+<body>
+
+<div class="logo">🔐 T-Disp TOTP</div>
+<p class="subtitle">Offline Export Decryption Tool</p>
+
+<div class="card">
+  <div style="display: flex; gap: 0.75rem; margin-bottom: 1.25rem;">
+    <button class="btn btn-sm" id="createKeysBtn" style="flex: 1;">➕ Create TOTP Keys File</button>
+    <button class="btn btn-sm" id="createPasswordsBtn" style="flex: 1;">➕ Create Passwords File</button>
+  </div>
+  
+  <div id="dropzone">
+    <div class="icon">📁</div>
+    <p>Drop your backup file here<br>or <span>click to browse</span></p>
+  </div>
+  <input type="file" id="fileInput" accept=".json,application/json">
+  <div id="filename"></div>
+
+  <label class="field-label" for="pwInput">Password</label>
+  <div class="pw-wrap">
+    <input type="password" id="pwInput" placeholder="Enter export password…" autocomplete="off">
+    <button class="pw-toggle" id="pwToggle" type="button">👁️</button>
+  </div>
+  <p class="hint">Same password as the web cabinet admin password</p>
+
+  <button class="btn btn-primary" id="decryptBtn">🔓 Decrypt</button>
+  <div id="status"></div>
+</div>
+
+<div id="results">
+  <div class="results-header">
+    <div class="results-title" id="resultsTitle"></div>
+    <div class="results-actions">
+      <button class="btn btn-sm" id="addRowBtn">➕ Add Row</button>
+      <button class="btn btn-sm" id="changePasswordBtn">🔑 Change Password</button>
+      <button class="btn btn-sm" id="csvBtn">📋 Copy CSV</button>
+      <button class="btn btn-sm" id="downloadBtn">⬇️ Download JSON</button>
+      <button class="btn btn-encrypt" id="encryptBtn">🔒 Save Encrypted</button>
+    </div>
+  </div>
+  <p class="hint" style="margin-bottom: 0.75rem; text-align: center;">💡 All fields are editable — click to modify values</p>
+  <div class="table-wrap">
+    <table>
+      <thead id="tableHead"></thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<p class="security-note"><span>🛡️ Fully offline.</span> Your data never leaves this device.<br>
+<span>✨ Extended format support:</span> TOTP/HOTP, SHA1/SHA256/SHA512, 6/8 digits, custom periods.</p>
+
+<!-- Modal for password change -->
+<div id="passwordModal" class="modal">
+  <div class="modal-content">
+    <h3 style="margin-bottom: 1rem; color: var(--accent2);">🔑 Change Password</h3>
+    <p style="color: var(--text2); font-size: 0.85rem; margin-bottom: 1.25rem;">
+      Enter a new password to re-encrypt the file. This password will be required to import the file on the device.
+    </p>
+    
+    <label class="field-label" for="currentPwInput">Current Password</label>
+    <div class="pw-wrap">
+      <input type="password" id="currentPwInput" placeholder="Current password…" autocomplete="off">
+      <button class="pw-toggle" type="button" onclick="toggleModalPw('currentPwInput', this)">👁️</button>
+    </div>
+    
+    <label class="field-label" for="newPwInput">New Password</label>
+    <div class="pw-wrap">
+      <input type="password" id="newPwInput" placeholder="New password…" autocomplete="off">
+      <button class="pw-toggle" type="button" onclick="toggleModalPw('newPwInput', this)">👁️</button>
+    </div>
+    
+    <label class="field-label" for="confirmPwInput">Confirm New Password</label>
+    <div class="pw-wrap">
+      <input type="password" id="confirmPwInput" placeholder="Confirm new password…" autocomplete="off">
+      <button class="pw-toggle" type="button" onclick="toggleModalPw('confirmPwInput', this)">👁️</button>
+    </div>
+    
+    <div id="modalStatus" style="min-height: 1.2em; font-size: 0.85rem; text-align: center; margin-top: 0.75rem;"></div>
+    
+    <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem;">
+      <button class="btn btn-sm" id="cancelPasswordBtn" style="flex: 1;">Cancel</button>
+      <button class="btn btn-primary" id="confirmPasswordBtn" style="flex: 1; margin-top: 0;">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal for creating new file -->
+<div id="createModal" class="modal">
+  <div class="modal-content">
+    <h3 style="margin-bottom: 1rem; color: var(--accent2);" id="createModalTitle">➕ Create New File</h3>
+    <p style="color: var(--text2); font-size: 0.85rem; margin-bottom: 1.25rem;" id="createModalDesc">
+      Create a new empty encrypted file. You can add entries and import it to your device.
+    </p>
+    
+    <label class="field-label" for="createPwInput">Password</label>
+    <div class="pw-wrap">
+      <input type="password" id="createPwInput" placeholder="Enter password for new file…" autocomplete="off">
+      <button class="pw-toggle" type="button" onclick="toggleModalPw('createPwInput', this)">👁️</button>
+    </div>
+    <p class="hint">Use the same password as your device admin password</p>
+    
+    <label class="field-label" for="createConfirmPwInput">Confirm Password</label>
+    <div class="pw-wrap">
+      <input type="password" id="createConfirmPwInput" placeholder="Confirm password…" autocomplete="off">
+      <button class="pw-toggle" type="button" onclick="toggleModalPw('createConfirmPwInput', this)">👁️</button>
+    </div>
+    
+    <div id="createModalStatus" style="min-height: 1.2em; font-size: 0.85rem; text-align: center; margin-top: 0.75rem;"></div>
+    
+    <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem;">
+      <button class="btn btn-sm" id="cancelCreateBtn" style="flex: 1;">Cancel</button>
+      <button class="btn btn-primary" id="confirmCreateBtn" style="flex: 1; margin-top: 0;">Create</button>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop',     e => e.preventDefault());
+
+const dropzone   = document.getElementById('dropzone');
+const fileInput  = document.getElementById('fileInput');
+const filenameEl = document.getElementById('filename');
+const pwInput    = document.getElementById('pwInput');
+const pwToggle   = document.getElementById('pwToggle');
+const decryptBtn = document.getElementById('decryptBtn');
+const statusEl   = document.getElementById('status');
+const resultsEl  = document.getElementById('results');
+
+let rawFileText   = null;
+let decryptedData = null;
+let isPasswords   = false;
+let createFileType = null; // 'keys' or 'passwords'
+
+// Modal helpers
+function toggleModalPw(inputId, btn) {
+  const input = document.getElementById(inputId);
+  const visible = input.type === 'text';
+  input.type = visible ? 'password' : 'text';
+  btn.textContent = visible ? '👁️' : '🙈';
+}
+
+function showModal(modalId) {
+  document.getElementById(modalId).classList.add('show');
+}
+
+function hideModal(modalId) {
+  document.getElementById(modalId).classList.remove('show');
+}
+
+// Create new file buttons
+document.getElementById('createKeysBtn').addEventListener('click', () => {
+  createFileType = 'keys';
+  document.getElementById('createModalTitle').textContent = '➕ Create TOTP Keys File';
+  document.getElementById('createModalDesc').textContent = 'Create a new empty TOTP/HOTP keys file. You can add entries and import it to your device.';
+  document.getElementById('createPwInput').value = '';
+  document.getElementById('createConfirmPwInput').value = '';
+  document.getElementById('createModalStatus').textContent = '';
+  showModal('createModal');
+});
+
+document.getElementById('createPasswordsBtn').addEventListener('click', () => {
+  createFileType = 'passwords';
+  document.getElementById('createModalTitle').textContent = '➕ Create Passwords File';
+  document.getElementById('createModalDesc').textContent = 'Create a new empty passwords file. You can add entries and import it to your device.';
+  document.getElementById('createPwInput').value = '';
+  document.getElementById('createConfirmPwInput').value = '';
+  document.getElementById('createModalStatus').textContent = '';
+  showModal('createModal');
+});
+
+document.getElementById('cancelCreateBtn').addEventListener('click', () => hideModal('createModal'));
+
+document.getElementById('confirmCreateBtn').addEventListener('click', async () => {
+  const pw = document.getElementById('createPwInput').value;
+  const confirmPw = document.getElementById('createConfirmPwInput').value;
+  const statusEl = document.getElementById('createModalStatus');
+  
+  if (!pw) {
+    statusEl.textContent = '❌ Password cannot be empty';
+    statusEl.className = 'error';
+    return;
+  }
+  
+  if (pw !== confirmPw) {
+    statusEl.textContent = '❌ Passwords do not match';
+    statusEl.className = 'error';
+    return;
+  }
+  
+  try {
+    // Create empty array
+    decryptedData = [];
+    isPasswords = createFileType === 'passwords';
+    pwInput.value = pw;
+    
+    // Encrypt and download
+    await doEncrypt();
+    
+    // Show empty table
+    renderTable(decryptedData);
+    hideModal('createModal');
+    setStatus('✅ New file created! Add entries and save.', 'ok');
+    resultsEl.scrollIntoView({ behavior: 'smooth' });
+  } catch(err) {
+    statusEl.textContent = '❌ Failed to create file: ' + err.message;
+    statusEl.className = 'error';
+  }
+});
+
+// File pick
+dropzone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) loadFile(fileInput.files[0]); });
+dropzone.addEventListener('dragover',  e => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add('over'); });
+dropzone.addEventListener('dragleave', e => { e.stopPropagation(); dropzone.classList.remove('over'); });
+dropzone.addEventListener('drop', e => {
+  e.preventDefault(); e.stopPropagation();
+  dropzone.classList.remove('over');
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+
+function loadFile(file) {
+  filenameEl.textContent = '📄 ' + file.name;
+  const r = new FileReader();
+  r.onload = ev => { rawFileText = ev.target.result; setStatus('File loaded — enter password and decrypt.', 'ok'); };
+  r.onerror = () => setStatus('Could not read file.', 'error');
+  r.readAsText(file);
+}
+
+// Password toggle
+let pwVisible = false;
+pwToggle.addEventListener('click', () => {
+  pwVisible = !pwVisible;
+  pwInput.type = pwVisible ? 'text' : 'password';
+  pwToggle.textContent = pwVisible ? '🙈' : '👁️';
+});
+
+// Decrypt
+decryptBtn.addEventListener('click', doDecrypt);
+pwInput.addEventListener('keydown', e => { if (e.key === 'Enter') doDecrypt(); });
+
+async function doDecrypt() {
+  if (!rawFileText)   { setStatus('Please select a file first.', 'error'); return; }
+  if (!pwInput.value) { setStatus('Please enter the password.', 'error'); return; }
+  setStatus('Decrypting…', 'loading');
+  resultsEl.style.display = 'none';
+  try {
+    let parsed = JSON.parse(rawFileText);
+    if (parsed.fileContent) parsed = JSON.parse(parsed.fileContent);
+    const { salt, iv, ciphertext } = parsed;
+    if (!salt || !iv || !ciphertext) throw new Error('Unrecognized file format.');
+
+    const pwKey = await crypto.subtle.importKey('raw', enc(pwInput.value), { name: 'PBKDF2' }, false, ['deriveBits']);
+    const bits  = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: b64(salt), iterations: 15000, hash: 'SHA-256' }, pwKey, 256);
+    const aes   = await crypto.subtle.importKey('raw', bits, { name: 'AES-CBC' }, false, ['decrypt']);
+    const plain = await crypto.subtle.decrypt({ name: 'AES-CBC', iv: b64(iv) }, aes, b64(ciphertext));
+
+    decryptedData = JSON.parse(new TextDecoder().decode(plain));
+    renderTable(decryptedData);
+    setStatus('✅ Decrypted successfully!', 'ok');
+  } catch(err) {
+    setStatus(err.name === 'OperationError' ? '❌ Wrong password or corrupted file.' : '❌ ' + err.message, 'error');
+  }
+}
+
+// Re-encrypt with same password → device-compatible file
+async function doEncrypt() {
+  if (!decryptedData || !pwInput.value) { setStatus('Decrypt first.', 'error'); return; }
+  try {
+    const plaintext = JSON.stringify(decryptedData);
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv   = crypto.getRandomValues(new Uint8Array(16));
+
+    const pwKey = await crypto.subtle.importKey('raw', enc(pwInput.value), { name: 'PBKDF2' }, false, ['deriveBits']);
+    const bits  = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 15000, hash: 'SHA-256' }, pwKey, 256);
+    const aes   = await crypto.subtle.importKey('raw', bits, { name: 'AES-CBC' }, false, ['encrypt']);
+    const cipher = await crypto.subtle.encrypt({ name: 'AES-CBC', iv }, aes, enc(plaintext));
+
+    const result = JSON.stringify({
+      salt:       btoa(String.fromCharCode(...salt)),
+      iv:         btoa(String.fromCharCode(...iv)),
+      ciphertext: btoa(String.fromCharCode(...new Uint8Array(cipher)))
+    });
+
+    const filename = isPasswords ? 'encrypted_passwords_backup.json' : 'encrypted_keys_backup.json';
+    download(result, filename);
+    flash(document.getElementById('encryptBtn'), '✅ Saved!');
+  } catch(err) {
+    setStatus('❌ Encryption failed: ' + err.message, 'error');
+  }
+}
+
+function renderTable(data) {
+  if (!Array.isArray(data)) { setStatus('Invalid data format.', 'error'); return; }
+  
+  // Allow empty arrays for new files
+  if (data.length === 0) {
+    isPasswords = createFileType === 'passwords';
+  } else {
+    isPasswords = data.some(r => 'password' in r);
+  }
+  
+  // Count special features for TOTP keys
+  let hotpCount = 0, sha256Count = 0, sha512Count = 0, digit8Count = 0;
+  if (!isPasswords) {
+    data.forEach(item => {
+      if ((item.type || 'T') === 'H') hotpCount++;
+      if ((item.algorithm || '1') === '256') sha256Count++;
+      if ((item.algorithm || '1') === '512') sha512Count++;
+      if ((item.digits || 6) === 8) digit8Count++;
+    });
+  }
+  
+  let titleBadges = '';
+  if (!isPasswords) {
+    if (hotpCount > 0) titleBadges += `<span class="badge badge-hotp">HOTP: ${hotpCount}</span>`;
+    if (sha256Count > 0) titleBadges += `<span class="badge badge-sha256">SHA256: ${sha256Count}</span>`;
+    if (sha512Count > 0) titleBadges += `<span class="badge badge-sha512">SHA512: ${sha512Count}</span>`;
+    if (digit8Count > 0) titleBadges += `<span class="badge badge-8digit">8-digit: ${digit8Count}</span>`;
+  }
+  
+  document.getElementById('resultsTitle').innerHTML = isPasswords
+    ? `🔑 Passwords (${data.length})`
+    : `🔐 TOTP Keys (${data.length}) ${titleBadges}`;
+
+  const head = document.getElementById('tableHead');
+  const body = document.getElementById('tableBody');
+  head.innerHTML = '';
+  body.innerHTML = '';
+
+  if (isPasswords) {
+    head.innerHTML = `<tr><th>#</th><th>Name</th><th>Password</th><th></th></tr>`;
+    data.forEach((item, i) => {
+      const tr = document.createElement('tr');
+
+      const td0 = mkTd('num-col'); td0.textContent = i + 1;
+
+      const td1 = mkTd();
+      const nameInp = mkInput('cell-edit', item.name || '');
+      nameInp.addEventListener('input', () => { data[i].name = nameInp.value; });
+      td1.appendChild(nameInp);
+
+      const td2 = mkTd();
+      const wrap = document.createElement('div'); wrap.className = 'pw-cell-wrap';
+      const pwInp = mkInput('pw-input', item.password || '');
+      pwInp.type = 'password';
+      pwInp.addEventListener('input', () => { data[i].password = pwInp.value; });
+      const revBtn = document.createElement('button'); revBtn.className = 'reveal-btn'; revBtn.textContent = '👁️';
+      revBtn.addEventListener('click', () => {
+        const h = pwInp.type === 'password'; pwInp.type = h ? 'text' : 'password'; revBtn.textContent = h ? '🙈' : '👁️';
+      });
+      wrap.append(pwInp, revBtn); td2.appendChild(wrap);
+
+      const td3 = mkTd();
+      const copyBtn = document.createElement('button'); copyBtn.className = 'copy-btn'; copyBtn.textContent = '📋';
+      copyBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText((data[i].name||'') + '\t' + (data[i].password||'')).then(() => flash(copyBtn,'✅'));
+      });
+      const delBtn = document.createElement('button'); delBtn.className = 'copy-btn'; delBtn.textContent = '🗑️'; delBtn.style.color = 'var(--danger)';
+      delBtn.addEventListener('click', () => {
+        if (confirm('Delete this entry?')) {
+          data.splice(i, 1);
+          renderTable(data);
+        }
+      });
+      td3.append(copyBtn, delBtn);
+
+      tr.append(td0, td1, td2, td3); body.appendChild(tr);
+    });
+  } else {
+    head.innerHTML = `<tr><th>#</th><th>Name</th><th>Secret</th><th>Type</th><th>Algorithm</th><th>Digits</th><th>Period/Counter</th><th></th></tr>`;
+    data.forEach((item, i) => {
+      const tr = document.createElement('tr');
+
+      const td0 = mkTd('num-col'); td0.textContent = i + 1;
+
+      const td1 = mkTd();
+      const nameInp = mkInput('cell-edit', item.name || '');
+      nameInp.addEventListener('input', () => { data[i].name = nameInp.value; });
+      td1.appendChild(nameInp);
+
+      const td2 = mkTd();
+      const secInp = mkInput('cell-edit mono', item.secret || '');
+      secInp.addEventListener('input', () => { data[i].secret = secInp.value; });
+      td2.appendChild(secInp);
+
+      // Type (TOTP/HOTP)
+      const td3 = mkTd();
+      const typeSelect = document.createElement('select');
+      typeSelect.className = 'cell-edit';
+      typeSelect.innerHTML = `<option value="T">TOTP</option><option value="H">HOTP</option>`;
+      typeSelect.value = item.type || 'T';
+      typeSelect.addEventListener('change', () => { 
+        data[i].type = typeSelect.value;
+        // Update period/counter field visibility
+        if (typeSelect.value === 'H') {
+          periodInp.placeholder = 'Counter';
+          periodInp.value = item.counter || 0;
+        } else {
+          periodInp.placeholder = 'Period (s)';
+          periodInp.value = item.period || 30;
+        }
+      });
+      td3.appendChild(typeSelect);
+
+      // Algorithm
+      const td4 = mkTd();
+      const algoSelect = document.createElement('select');
+      algoSelect.className = 'cell-edit';
+      algoSelect.innerHTML = `<option value="1">SHA1</option><option value="256">SHA256</option><option value="512">SHA512</option>`;
+      algoSelect.value = item.algorithm || '1';
+      algoSelect.addEventListener('change', () => { data[i].algorithm = algoSelect.value; });
+      td4.appendChild(algoSelect);
+
+      // Digits
+      const td5 = mkTd();
+      const digitsSelect = document.createElement('select');
+      digitsSelect.className = 'cell-edit';
+      digitsSelect.innerHTML = `<option value="6">6</option><option value="8">8</option>`;
+      digitsSelect.value = item.digits || 6;
+      digitsSelect.addEventListener('change', () => { data[i].digits = parseInt(digitsSelect.value); });
+      td5.appendChild(digitsSelect);
+
+      // Period/Counter (dynamic based on type)
+      const td6 = mkTd();
+      const periodInp = mkInput('cell-edit', '');
+      periodInp.type = 'number';
+      periodInp.min = '0';
+      if ((item.type || 'T') === 'H') {
+        periodInp.placeholder = 'Counter';
+        periodInp.value = item.counter || 0;
+        periodInp.addEventListener('input', () => { data[i].counter = parseInt(periodInp.value) || 0; });
+      } else {
+        periodInp.placeholder = 'Period (s)';
+        periodInp.value = item.period || 30;
+        periodInp.addEventListener('input', () => { data[i].period = parseInt(periodInp.value) || 30; });
+      }
+      td6.appendChild(periodInp);
+
+      const td7 = mkTd();
+      const copyBtn = document.createElement('button'); copyBtn.className = 'copy-btn'; copyBtn.textContent = '📋';
+      copyBtn.addEventListener('click', () => {
+        const meta = `Type: ${data[i].type||'T'}, Algo: SHA${data[i].algorithm||'1'}, Digits: ${data[i].digits||6}`;
+        navigator.clipboard.writeText((data[i].name||'') + '\t' + (data[i].secret||'') + '\t' + meta).then(() => flash(copyBtn,'✅'));
+      });
+      const delBtn = document.createElement('button'); delBtn.className = 'copy-btn'; delBtn.textContent = '🗑️'; delBtn.style.color = 'var(--danger)';
+      delBtn.addEventListener('click', () => {
+        if (confirm('Delete this TOTP key?')) {
+          data.splice(i, 1);
+          renderTable(data);
+        }
+      });
+      td7.append(copyBtn, delBtn);
+
+      tr.append(td0, td1, td2, td3, td4, td5, td6, td7); body.appendChild(tr);
+    });
+  }
+
+  // CSV
+  document.getElementById('csvBtn').onclick = () => {
+    const csv = isPasswords
+      ? 'Name,Password\n' + data.map(r => [r.name, r.password].map(q).join(',')).join('\n')
+      : 'Name,Secret,Type,Algorithm,Digits,Period,Counter\n' + data.map(r => [
+          r.name, 
+          r.secret, 
+          r.type || 'T',
+          'SHA' + (r.algorithm || '1'),
+          r.digits || 6,
+          r.period || 30,
+          r.counter || 0
+        ].map(q).join(',')).join('\n');
+    navigator.clipboard.writeText(csv).then(() => flash(document.getElementById('csvBtn'), '✅ Copied!'));
+  };
+
+  // Download plain JSON
+  document.getElementById('downloadBtn').onclick = () => {
+    download(JSON.stringify(data, null, 2), isPasswords ? 'passwords_decrypted.json' : 'totp_keys_decrypted.json');
+  };
+
+  // Re-encrypt
+  document.getElementById('encryptBtn').onclick = doEncrypt;
+
+  // Add row
+  document.getElementById('addRowBtn').onclick = () => {
+    if (isPasswords) {
+      data.push({ name: '', password: '' });
+    } else {
+      data.push({ name: '', secret: '', type: 'T', algorithm: '1', digits: 6, period: 30, counter: 0 });
+    }
+    renderTable(data);
+    // Scroll to bottom
+    setTimeout(() => {
+      const table = document.querySelector('#tableBody');
+      table.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 50);
+  };
+
+  // Change password
+  document.getElementById('changePasswordBtn').onclick = () => {
+    document.getElementById('currentPwInput').value = pwInput.value;
+    document.getElementById('newPwInput').value = '';
+    document.getElementById('confirmPwInput').value = '';
+    document.getElementById('modalStatus').textContent = '';
+    showModal('passwordModal');
+  };
+
+  resultsEl.style.display = 'block';
+  setTimeout(() => resultsEl.scrollIntoView({ behavior: 'smooth' }), 50);
+}
+
+// Password change modal handlers
+document.getElementById('cancelPasswordBtn').addEventListener('click', () => hideModal('passwordModal'));
+
+document.getElementById('confirmPasswordBtn').addEventListener('click', async () => {
+  const currentPw = document.getElementById('currentPwInput').value;
+  const newPw = document.getElementById('newPwInput').value;
+  const confirmPw = document.getElementById('confirmPwInput').value;
+  const statusEl = document.getElementById('modalStatus');
+  
+  if (currentPw !== pwInput.value) {
+    statusEl.textContent = '❌ Current password is incorrect';
+    statusEl.className = 'error';
+    return;
+  }
+  
+  if (!newPw) {
+    statusEl.textContent = '❌ New password cannot be empty';
+    statusEl.className = 'error';
+    return;
+  }
+  
+  if (newPw !== confirmPw) {
+    statusEl.textContent = '❌ Passwords do not match';
+    statusEl.className = 'error';
+    return;
+  }
+  
+  try {
+    // Update password
+    pwInput.value = newPw;
+    
+    // Re-encrypt with new password
+    await doEncrypt();
+    
+    statusEl.textContent = '✅ Password changed successfully!';
+    statusEl.className = 'ok';
+    
+    setTimeout(() => {
+      hideModal('passwordModal');
+      setStatus('✅ File re-encrypted with new password!', 'ok');
+    }, 1500);
+  } catch(err) {
+    statusEl.textContent = '❌ Failed to change password: ' + err.message;
+    statusEl.className = 'error';
+  }
+});
+
+// ── Helpers ──
+function mkTd(cls)        { const t = document.createElement('td'); if(cls) t.className = cls; return t; }
+function mkInput(cls, val){ const i = document.createElement('input'); i.className = cls; i.value = val; return i; }
+function b64(s)           { const b=atob(s), u=new Uint8Array(b.length); for(let i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return u; }
+function enc(s)           { return new TextEncoder().encode(s); }
+function q(v)             { if(v==null) return ''; const s=String(v); return (s.includes(',')||s.includes('"')||s.includes('\n')) ? '"'+s.replace(/"/g,'""')+'"' : s; }
+function flash(btn, lbl)  { const o=btn.textContent; btn.textContent=lbl; setTimeout(()=>btn.textContent=o, 1300); }
+function setStatus(m, t)  { statusEl.textContent=m; statusEl.className=t||''; }
+function download(text, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  a.download = name; a.click();
+}
+</script>
+</body>
+</html>

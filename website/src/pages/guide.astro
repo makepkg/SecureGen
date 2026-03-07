@@ -1,0 +1,102 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="User Guide — SecureGen" page="guide">
+  <section class="page-header">
+    <p class="breadcrumb">
+      <a href="/SecureGen/">Home</a> / Guide
+    </p>
+    <h1>User Guide</h1>
+    <p class="description">
+      Complete reference: device setup, button controls, operating modes, web interface, and all features.
+    </p>
+    <div class="callout callout-tip">
+      💡 Tip: Use the sidebar inside the guide to jump between sections.
+    </div>
+  </section>
+
+  <section class="guide-container">
+    <iframe 
+      src="/SecureGen/guide-standalone.html" 
+      style="width:100%; height:85vh; border:1px solid var(--border); border-radius:8px; background:#0a0a0f;" 
+      title="SecureGen User Guide"
+    ></iframe>
+  </section>
+
+  <section class="fallback">
+    <p class="fallback-text">
+      Not loading? 
+      <a href="/SecureGen/guide-standalone.html" target="_blank" rel="noopener noreferrer">
+        Open guide in new tab →
+      </a>
+    </p>
+  </section>
+</Layout>
+
+<style>
+  .page-header {
+    margin-bottom: 2rem;
+  }
+
+  .breadcrumb {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-bottom: 0.5rem;
+  }
+
+  .breadcrumb a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .breadcrumb a:hover {
+    text-decoration: underline;
+  }
+
+  h1 {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .description {
+    font-size: 1.1rem;
+    color: var(--text);
+    margin-bottom: 1.5rem;
+  }
+
+  .callout {
+    padding: 1rem 1.25rem;
+    border-radius: 6px;
+    margin: 1rem 0;
+  }
+
+  .callout-tip {
+    background-color: rgba(0, 229, 255, 0.06);
+    border-left: 3px solid var(--accent);
+    color: var(--accent);
+  }
+
+  .guide-container {
+    margin: 2rem 0;
+  }
+
+  .fallback {
+    margin-top: 1rem;
+    text-align: center;
+  }
+
+  .fallback-text {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+  }
+
+  .fallback-text a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .fallback-text a:hover {
+    text-decoration: underline;
+  }
+</style>

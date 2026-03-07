@@ -1,0 +1,576 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="Flash Firmware — SecureGen" page="flash">
+  <section class="page-header">
+    <h1>Flash Firmware</h1>
+    <p class="description">
+      Install SecureGen on your ESP32 directly from the browser. No drivers, no software, no command line.
+    </p>
+    <div class="callout callout-warning">
+      ⚠ Requires Chrome 89+ or Edge 89+ on desktop. Not supported in Firefox, Safari, or mobile browsers.
+    </div>
+  </section>
+
+  <section class="flash-card-container">
+    <div class="flash-card">
+      <label class="select-label">Device Model</label>
+      <select id="board-select" class="select-input">
+        <option disabled selected>Loading boards...</option>
+      </select>
+      <p id="board-description" class="select-description"></p>
+
+      <div class="divider"></div>
+
+      <label class="select-label">Firmware Version</label>
+      <select id="version-select" class="select-input">
+        <option disabled selected>Loading versions...</option>
+      </select>
+      <p id="version-info" class="select-description"></p>
+
+      <div class="divider"></div>
+
+      <esp-web-install-button id="flash-button" manifest="">
+        <button slot="activate" class="flash-btn">
+          ⚡ Flash SecureGen
+        </button>
+        <span slot="unsupported" class="unsupported">
+          ⚠ Your browser doesn't support Web Serial. 
+          <a href="https://www.google.com/chrome/" target="_blank" rel="noopener noreferrer">Use Chrome or Edge</a>
+        </span>
+      </esp-web-install-button>
+
+      <p class="warning-note">
+        This will erase all existing data on the device. Make sure to export backups first.
+      </p>
+    </div>
+  </section>
+
+  <section class="steps-preview">
+    <h2>How it works:</h2>
+    <div class="steps-grid">
+      <div class="step-card">
+        <div class="step-icon">🔌</div>
+        <h3>Connect</h3>
+        <p>Plug in your ESP32 via USB</p>
+      </div>
+      <div class="step-card">
+        <div class="step-icon">⚡</div>
+        <h3>Flash</h3>
+        <p>Click the button above, select your port</p>
+      </div>
+      <div class="step-card">
+        <div class="step-icon">🚀</div>
+        <h3>Done</h3>
+        <p>Device reboots with SecureGen installed</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="manual-fallback">
+    <details>
+      <summary>Manual installation with esptool (advanced)</summary>
+      <div class="manual-content">
+        <h3>Step 1: Install esptool</h3>
+        <div class="code-block">
+          <pre><code>pip install esptool</code></pre>
+          <button class="btn-copy" data-copy="pip install esptool">Copy</button>
+        </div>
+
+        <h3>Step 2: Download Firmware</h3>
+        <p>
+          Download the latest firmware files from 
+          <a href="https://github.com/makepkg/SecureGen/releases" target="_blank" rel="noopener noreferrer">
+            GitHub Releases
+          </a>
+        </p>
+
+        <h3>Step 3: Flash all 3 files</h3>
+        <p><strong>Linux/Mac:</strong></p>
+        <div class="code-block">
+          <pre><code>esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
+  write_flash \
+  0x1000 bootloader.bin \
+  0x8000 partitions.bin \
+  0x10000 firmware.bin</code></pre>
+          <button class="btn-copy" data-copy="esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 write_flash 0x1000 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin">Copy</button>
+        </div>
+
+        <p><strong>Windows:</strong></p>
+        <div class="code-block">
+          <pre><code>esptool.py --chip esp32 --port COM3 --baud 921600 \
+  write_flash \
+  0x1000 bootloader.bin \
+  0x8000 partitions.bin \
+  0x10000 firmware.bin</code></pre>
+          <button class="btn-copy" data-copy="esptool.py --chip esp32 --port COM3 --baud 921600 write_flash 0x1000 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin">Copy</button>
+        </div>
+
+        <h3>Alternative: Single merged file (easier)</h3>
+        <p>Or use the merged binary (one file, easier):</p>
+        <div class="code-block">
+          <pre><code>esptool.py --port /dev/ttyUSB0 write_flash 0x0 merged-firmware.bin</code></pre>
+          <button class="btn-copy" data-copy="esptool.py --port /dev/ttyUSB0 write_flash 0x0 merged-firmware.bin">Copy</button>
+        </div>
+        <p class="note">Windows: replace /dev/ttyUSB0 with COM3</p>
+      </div>
+    </details>
+  </section>
+</Layout>
+
+<script type="module" src="https://unpkg.com/esp-web-tools@9.4.3/dist/web/install-button.js?module"></script>
+
+<style>
+  .page-header {
+    text-align: center;
+    margin-bottom: 3rem;
+  }
+
+  h1 {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+    text-align: center;
+  }
+
+  .description {
+    font-size: 1.1rem;
+    color: var(--text);
+    margin-bottom: 1.5rem;
+  }
+
+  .callout {
+    padding: 1rem 1.25rem;
+    border-radius: 6px;
+    margin: 1rem auto;
+    max-width: 700px;
+  }
+
+  .callout-warning {
+    background-color: rgba(245, 158, 11, 0.06);
+    border-left: 3px solid #f59e0b;
+    color: #fbbf24;
+  }
+
+  .flash-card-container {
+    display: flex;
+    justify-content: center;
+    margin: 3rem 0;
+  }
+
+  .flash-card {
+    max-width: 560px;
+    width: 100%;
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2rem;
+  }
+
+  .select-label {
+    display: block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-dim);
+    margin-bottom: 0.5rem;
+  }
+
+  .select-input {
+    width: 100%;
+    background-color: #0d0d14;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-bright);
+    padding: 0.65rem 1rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+
+  .select-input:focus {
+    border-color: var(--accent);
+    outline: none;
+  }
+
+  .select-description {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin-top: 0.5rem;
+    line-height: 1.5;
+  }
+
+  .select-description a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .select-description a:hover {
+    text-decoration: underline;
+  }
+
+  .divider {
+    height: 1px;
+    background-color: var(--border);
+    margin: 1.5rem 0;
+  }
+
+  .flash-btn {
+    width: 100%;
+    padding: 1rem 2rem;
+    font-size: 1.1rem;
+    font-weight: 700;
+    background-color: #00e5ff;
+    color: #0a0a0f;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+
+  .flash-btn:hover {
+    opacity: 0.85;
+  }
+
+  .unsupported {
+    display: block;
+    text-align: center;
+    padding: 1rem;
+    color: #f59e0b;
+    background-color: rgba(245, 158, 11, 0.06);
+    border-radius: 8px;
+  }
+
+  .unsupported a {
+    color: #fbbf24;
+    text-decoration: underline;
+  }
+
+  .warning-note {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    text-align: center;
+    margin-top: 1rem;
+    line-height: 1.5;
+  }
+
+  .steps-preview {
+    margin: 4rem 0;
+  }
+
+  .steps-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  .step-card {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    text-align: center;
+  }
+
+  .step-icon {
+    font-size: 2.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .step-card h3 {
+    font-size: 1.1rem;
+    margin-bottom: 0.5rem;
+    color: var(--text-bright);
+  }
+
+  .step-card p {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+
+  .manual-fallback {
+    margin: 4rem auto;
+    max-width: 800px;
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+  }
+
+  .manual-fallback summary {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 1.1rem;
+    cursor: pointer;
+    color: var(--text-bright);
+  }
+
+  .manual-content {
+    margin-top: 1.5rem;
+  }
+
+  .manual-content h3 {
+    font-size: 1rem;
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .manual-content p {
+    margin: 0.75rem 0;
+    color: var(--text);
+  }
+
+  .code-block {
+    position: relative;
+    margin: 0.75rem 0;
+  }
+
+  .code-block pre {
+    background-color: #0d0d14;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+    overflow-x: auto;
+  }
+
+  .code-block code {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.85rem;
+    color: #e2e8f0;
+  }
+
+  .btn-copy {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    padding: 0.25rem 0.75rem;
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+
+  .btn-copy:hover {
+    background-color: var(--border);
+  }
+
+  .note {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    font-style: italic;
+  }
+
+  .manual-content a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .manual-content a:hover {
+    text-decoration: underline;
+  }
+
+  @media (max-width: 768px) {
+    .steps-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .flash-card {
+      margin: 0 1rem;
+    }
+  }
+</style>
+
+<script>
+  const REPO = 'makepkg/SecureGen';
+  const BASE = '/SecureGen';
+
+  let boards = [];
+  let releases = [];
+  let selectedBoard = null;
+  let selectedVersion = 'latest';
+
+  async function init() {
+    await Promise.all([loadBoards(), loadReleases()]);
+    setupEventListeners();
+    updateManifest();
+  }
+
+  async function loadBoards() {
+    try {
+      const response = await fetch(BASE + '/firmware/boards.json');
+      if (!response.ok) throw new Error('Failed to fetch boards');
+      
+      const data = await response.json();
+      boards = data.boards;
+      
+      const boardSelect = document.getElementById('board-select');
+      if (boardSelect && boards.length > 0) {
+        boardSelect.innerHTML = boards.map(board => 
+          `<option value="${board.id}">${board.name}</option>`
+        ).join('');
+        
+        selectedBoard = boards[0];
+        updateBoardDescription();
+      }
+    } catch (err) {
+      console.error('Failed to load boards:', err);
+      const boardSelect = document.getElementById('board-select');
+      if (boardSelect) {
+        boardSelect.innerHTML = '<option disabled>Failed to load boards</option>';
+      }
+    }
+  }
+
+  async function loadReleases() {
+    try {
+      const response = await fetch(`https://api.github.com/repos/${REPO}/releases`);
+      if (!response.ok) throw new Error('Failed to fetch releases');
+      
+      releases = await response.json();
+      
+      const versionSelect = document.getElementById('version-select');
+      if (versionSelect && releases.length > 0) {
+        const latestRelease = releases[0];
+        const options = [
+          `<option value="latest">Latest (${latestRelease.tag_name})</option>`
+        ];
+        
+        releases.forEach(release => {
+          const date = new Date(release.published_at);
+          const formattedDate = date.toLocaleDateString('en-US', { 
+            day: 'numeric', 
+            month: 'short', 
+            year: 'numeric' 
+          });
+          const label = `${release.tag_name} · ${formattedDate}${release.name ? ' · ' + release.name : ''}`;
+          options.push(`<option value="${release.tag_name}">${label}</option>`);
+        });
+        
+        versionSelect.innerHTML = options.join('');
+        updateVersionInfo();
+      }
+    } catch (err) {
+      console.error('Failed to load releases:', err);
+      const versionSelect = document.getElementById('version-select');
+      if (versionSelect) {
+        versionSelect.innerHTML = '<option disabled>Failed to load versions</option>';
+      }
+    }
+  }
+
+  function updateBoardDescription() {
+    const boardDesc = document.getElementById('board-description');
+    if (boardDesc && selectedBoard) {
+      boardDesc.textContent = `${selectedBoard.description} · ${selectedBoard.chip}`;
+    }
+  }
+
+  function updateVersionInfo() {
+    const versionInfo = document.getElementById('version-info');
+    if (!versionInfo || releases.length === 0) return;
+    
+    const release = selectedVersion === 'latest' 
+      ? releases[0] 
+      : releases.find(r => r.tag_name === selectedVersion);
+    
+    if (release) {
+      const date = new Date(release.published_at);
+      const formattedDate = date.toLocaleDateString('en-US', { 
+        day: 'numeric', 
+        month: 'short', 
+        year: 'numeric' 
+      });
+      
+      versionInfo.innerHTML = `
+        Released ${formattedDate} · 
+        <a href="https://github.com/${REPO}/releases/tag/${release.tag_name}" target="_blank" rel="noopener noreferrer">
+          Release notes →
+        </a>
+      `;
+    }
+  }
+
+  function updateManifest() {
+    if (!selectedBoard || releases.length === 0) return;
+    
+    const baseUrl = selectedVersion === 'latest'
+      ? `https://github.com/${REPO}/releases/latest/download/`
+      : `https://github.com/${REPO}/releases/download/${selectedVersion}/`;
+    
+    const prefix = selectedBoard.asset_prefix;
+    
+    const manifest = {
+      name: "SecureGen",
+      version: selectedVersion,
+      new_install_prompt_erase: true,
+      builds: [{
+        chipFamily: selectedBoard.chip,
+        parts: [
+          { 
+            path: baseUrl + prefix + "bootloader.bin", 
+            offset: selectedBoard.offsets.bootloader 
+          },
+          { 
+            path: baseUrl + prefix + "partitions.bin", 
+            offset: selectedBoard.offsets.partitions 
+          },
+          { 
+            path: baseUrl + prefix + "firmware.bin", 
+            offset: selectedBoard.offsets.firmware 
+          }
+        ]
+      }]
+    };
+    
+    const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+    const flashButton = document.getElementById('flash-button');
+    if (flashButton) {
+      flashButton.setAttribute('manifest', URL.createObjectURL(blob));
+    }
+  }
+
+  function setupEventListeners() {
+    const boardSelect = document.getElementById('board-select');
+    const versionSelect = document.getElementById('version-select');
+    
+    boardSelect?.addEventListener('change', (e) => {
+      const boardId = (e.target as HTMLSelectElement).value;
+      selectedBoard = boards.find(b => b.id === boardId) || null;
+      updateBoardDescription();
+      updateManifest();
+    });
+    
+    versionSelect?.addEventListener('change', (e) => {
+      selectedVersion = (e.target as HTMLSelectElement).value;
+      updateVersionInfo();
+      updateManifest();
+    });
+
+    // Setup copy buttons
+    document.querySelectorAll('.btn-copy').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const text = (e.target as HTMLElement).getAttribute('data-copy');
+        if (text) {
+          navigator.clipboard.writeText(text);
+          (e.target as HTMLElement).textContent = 'Copied!';
+          setTimeout(() => {
+            (e.target as HTMLElement).textContent = 'Copy';
+          }, 2000);
+        }
+      });
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+</script>

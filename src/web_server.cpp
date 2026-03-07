@@ -8,6 +8,7 @@
 #include "crypto_manager.h"
 #include "web_admin_manager.h" 
 #include "web_pages/page_login.h"
+#include <nvs_flash.h>  // Для очистки NVS partition при factory reset
 #ifdef DEBUG_BUILD
 #include "web_pages/page_test_encryption.h"
 #endif
@@ -224,7 +225,7 @@ void WebServerManager::update() {
             _oneMinuteWarningShown = true;
         }
         
-        LOG_INFO("WebServer", "Timeout check: elapsed=" + String(elapsedTime) + "s, timeout=" + String(timeoutSeconds) + "s, remaining=" + String(remainingTime) + "s");
+        // Убрали частый INFO лог - оставляем только предупреждение выше
     }
 }
 
@@ -320,7 +321,7 @@ void WebServerManager::start() {
             // Тело уже обработано в bodyHandler
             if (request->_tempObject) {
                 auto* registerData = (JsonDocument*)request->_tempObject;
-                if (registerData->containsKey("username") && registerData->containsKey("password")) {
+                if (!(*registerData)["username"].isNull() && !(*registerData)["password"].isNull()) {
                     username = (*registerData)["username"].as<String>();
                     password = (*registerData)["password"].as<String>();
                     LOG_INFO("WebServer", "🔐 Register with encrypted body for user: [HIDDEN]");
@@ -363,7 +364,7 @@ void WebServerManager::start() {
                 
                 // Парсим JSON с зашифрованными данными
                 JsonDocument doc;
-                if (deserializeJson(doc, body) != DeserializationError::Ok || !doc.containsKey("encrypted")) {
+                if (deserializeJson(doc, body) != DeserializationError::Ok || doc["encrypted"].isNull()) {
                     LOG_ERROR("WebServer", "🔐 Register: Failed to parse encrypted body JSON");
                     return;
                 }
@@ -439,7 +440,7 @@ void WebServerManager::start() {
             // Тело уже обработано в bodyHandler, данные в request->_tempObject
             if (request->_tempObject) {
                 auto* loginData = (JsonDocument*)request->_tempObject;
-                if (loginData->containsKey("username") && loginData->containsKey("password")) {
+                if (!(*loginData)["username"].isNull() && !(*loginData)["password"].isNull()) {
                     username = (*loginData)["username"].as<String>();
                     password = (*loginData)["password"].as<String>();
                     LOG_INFO("WebServer", "🔐 Login with encrypted body for user: [HIDDEN]");
@@ -517,7 +518,7 @@ void WebServerManager::start() {
                 
                 // Парсим JSON с зашифрованными данными
                 JsonDocument doc;
-                if (deserializeJson(doc, body) != DeserializationError::Ok || !doc.containsKey("encrypted")) {
+                if (deserializeJson(doc, body) != DeserializationError::Ok || doc["encrypted"].isNull()) {
                     LOG_ERROR("WebServer", "🔐 Login: Failed to parse encrypted body JSON");
                     return;
                 }
@@ -599,7 +600,7 @@ void WebServerManager::start() {
             if (isEncrypted) {
                 if (request->_tempObject) {
                     auto* loginData = (JsonDocument*)request->_tempObject;
-                    if (loginData->containsKey("username") && loginData->containsKey("password")) {
+                    if (!(*loginData)["username"].isNull() && !(*loginData)["password"].isNull()) {
                         username = (*loginData)["username"].as<String>();
                         password = (*loginData)["password"].as<String>();
                         LOG_INFO("WebServer", "🔐 Login (obfuscated) with encrypted body for user: [HIDDEN]");
@@ -669,7 +670,7 @@ void WebServerManager::start() {
                     
                     
                     JsonDocument doc;
-                    if (deserializeJson(doc, body) != DeserializationError::Ok || !doc.containsKey("encrypted")) {
+                    if (deserializeJson(doc, body) != DeserializationError::Ok || doc["encrypted"].isNull()) {
                         LOG_ERROR("WebServer", "🔐 Login (obfuscated): Failed to parse encrypted body JSON");
                         return;
                     }
@@ -1126,9 +1127,34 @@ void WebServerManager::start() {
             
             for (size_t i = 0; i < keys.size(); i++) {
                 JsonObject keyObj = keysArray.add<JsonObject>();
+                
+                // Основные поля (всегда присутствуют)
                 keyObj["name"] = keys[i].name;
-                keyObj["code"] = blockTOTP ? "NOT SYNCED" : totpGenerator.generateTOTP(keys[i].secret);
-                keyObj["timeLeft"] = totpGenerator.getTimeRemaining();
+                // HOTP works without time sync, TOTP requires it
+                if (keys[i].type == TOTPType::HOTP) {
+                    keyObj["code"] = totpGenerator.generateCode(keys[i]);
+                } else {
+                    keyObj["code"] = blockTOTP ? "NOT SYNCED" : totpGenerator.generateCode(keys[i]);
+                }
+                
+                // Время до следующего кода (для TOTP) или 0 для HOTP
+                if (keys[i].type == TOTPType::TOTP) {
+                    keyObj["timeLeft"] = totpGenerator.getTimeRemaining(keys[i].period);
+                } else {
+                    keyObj["timeLeft"] = 0; // HOTP не имеет таймера
+                }
+                
+                // 🆕 РАСШИРЕННЫЕ МЕТАДАННЫЕ (компактный формат)
+                // Всегда включаем метаданные для корректной работы фронтенда
+                keyObj["t"] = (keys[i].type == TOTPType::HOTP) ? "H" : "T";
+                keyObj["a"] = (keys[i].algorithm == TOTPAlgorithm::SHA256) ? "256" :
+                              (keys[i].algorithm == TOTPAlgorithm::SHA512) ? "512" : "1";
+                keyObj["d"] = keys[i].digits;
+                keyObj["p"] = keys[i].period;
+                
+                if (keys[i].counter != 0) {
+                    keyObj["c"] = keys[i].counter;
+                }
             }
             
             String response;
@@ -1187,7 +1213,14 @@ void WebServerManager::start() {
             if (!isAuthenticated(request)) return request->send(401);
             if (!verifyCsrfToken(request)) return request->send(403, "text/plain", "CSRF token mismatch");
             
-            String name, secret;
+            // 🛡️ SECURITY: Проверка размера входящего пакета (max 1024 байт)
+            if (len > 1024) {
+                LOG_ERROR("WebServer", "KEY ADD: Request body too large: " + String(len) + " bytes");
+                return request->send(413, "application/json", "{\"error\":\"Request body too large\"}");
+            }
+            
+            String bodyStr;
+            bool isJsonFormat = false;
             
 #ifdef SECURE_LAYER_ENABLED
             // 🎭 HEADER OBFUSCATION: Деобфускация заголовков
@@ -1199,7 +1232,6 @@ void WebServerManager::start() {
             bool isSecureReq = HeaderObfuscationIntegration::isSecureRequest(request, headerObf);
             
             if (clientId.length() > 0 && secureLayer.isSecureSessionValid(clientId) && isSecureReq) {
-                
                 LOG_INFO("WebServer", "🔐 KEY ADD: Decrypting request body for " + clientId.substring(0,8) + "...");
                 
                 // Расшифровываем тело запроса
@@ -1207,29 +1239,11 @@ void WebServerManager::start() {
                 String decryptedBody;
                 
                 if (secureLayer.decryptRequest(clientId, encryptedBody, decryptedBody)) {
-                    LOG_DEBUG("WebServer", "🔐 Decrypted body: " + decryptedBody.substring(0, 50) + "...");
+                    LOG_DEBUG("WebServer", "🔐 Decrypted body length: " + String(decryptedBody.length()) + " bytes");
+                    bodyStr = decryptedBody;
                     
-                    // Парсим расшифрованные данные (формат: name=value&secret=value)
-                    int nameStart = decryptedBody.indexOf("name=");
-                    int secretStart = decryptedBody.indexOf("secret=");
-                    
-                    if (nameStart >= 0 && secretStart >= 0) {
-                        int nameEnd = decryptedBody.indexOf("&", nameStart);
-                        if (nameEnd == -1) nameEnd = decryptedBody.length();
-                        
-                        int secretEnd = decryptedBody.indexOf("&", secretStart);
-                        if (secretEnd == -1) secretEnd = decryptedBody.length();
-                        
-                        name = decryptedBody.substring(nameStart + 5, nameEnd);
-                        secret = decryptedBody.substring(secretStart + 7, secretEnd);
-                        
-                        name.replace("+", " ");
-                        secret.replace("+", " ");
-                        
-                        LOG_DEBUG("WebServer", "🔐 Parsed: name=" + name + ", secret=" + secret.substring(0, 8) + "...");
-                    } else {
-                        return request->send(400, "text/plain", "Invalid decrypted data format");
-                    }
+                    // Проверяем формат (JSON или FormData)
+                    isJsonFormat = bodyStr.startsWith("{");
                 } else {
                     LOG_ERROR("WebServer", "🔐 Failed to decrypt request body");
                     return request->send(400, "text/plain", "Decryption failed");
@@ -1237,40 +1251,195 @@ void WebServerManager::start() {
             } else 
 #endif
             {
-                // Обычный незашифрованный запрос - читаем параметры
-                if (request->hasParam("name", true) && request->hasParam("secret", true)) {
-                    name = request->getParam("name", true)->value();
-                    secret = request->getParam("secret", true)->value();
+                // Обычный незашифрованный запрос
+                bodyStr = String((char*)data, len);
+                
+                // Проверяем Content-Type для определения формата
+                if (request->hasHeader("Content-Type")) {
+                    String contentType = request->getHeader("Content-Type")->value();
+                    isJsonFormat = contentType.indexOf("application/json") >= 0;
                 } else {
-                    return request->send(400, "text/plain", "Missing required parameters");
+                    // Автоопределение по первому символу
+                    isJsonFormat = bodyStr.startsWith("{");
                 }
             }
             
-            if (name.isEmpty() || secret.isEmpty()) {
-                return request->send(400, "text/plain", "Name and secret cannot be empty");
+            // === ПАРСИНГ ДАННЫХ ===
+            String name, secret;
+            TOTPType type = TOTPType::TOTP;
+            TOTPAlgorithm algorithm = TOTPAlgorithm::SHA1;
+            uint8_t digits = 6;
+            uint16_t period = 30;
+            uint32_t counter = 0;
+            
+            if (isJsonFormat) {
+                // 🆕 НОВЫЙ ФОРМАТ: Компактный JSON {n, s, t, a, d, p, c}
+                LOG_INFO("WebServer", "KEY ADD: Parsing JSON format");
+                
+                JsonDocument doc;
+                DeserializationError error = deserializeJson(doc, bodyStr);
+                
+                if (error) {
+                    LOG_ERROR("WebServer", "KEY ADD: JSON parsing failed: " + String(error.c_str()));
+                    return request->send(400, "application/json", "{\"error\":\"Invalid JSON format\"}");
+                }
+                
+                // Обязательные поля
+                if (doc["n"].isNull() || doc["s"].isNull()) {
+                    LOG_ERROR("WebServer", "KEY ADD: Missing required fields (n, s)");
+                    return request->send(400, "application/json", "{\"error\":\"Missing required fields: n (name), s (secret)\"}");
+                }
+                
+                name = doc["n"].as<String>();
+                secret = doc["s"].as<String>();
+                
+                // Опциональные поля с валидацией
+                if (!doc["t"].isNull()) {
+                    String typeStr = doc["t"].as<String>();
+                    if (typeStr == "H") {
+                        type = TOTPType::HOTP;
+                    } else if (typeStr == "T") {
+                        type = TOTPType::TOTP;
+                    } else {
+                        LOG_ERROR("WebServer", "KEY ADD: Invalid type value: " + typeStr);
+                        return request->send(400, "application/json", "{\"error\":\"Invalid type (t): must be 'T' or 'H'\"}");
+                    }
+                }
+                
+                if (!doc["a"].isNull()) {
+                    String algoStr = doc["a"].as<String>();
+                    if (algoStr == "1") {
+                        algorithm = TOTPAlgorithm::SHA1;
+                    } else if (algoStr == "256") {
+                        algorithm = TOTPAlgorithm::SHA256;
+                    } else if (algoStr == "512") {
+                        algorithm = TOTPAlgorithm::SHA512;
+                    } else {
+                        LOG_ERROR("WebServer", "KEY ADD: Invalid algorithm value: " + algoStr);
+                        return request->send(400, "application/json", "{\"error\":\"Invalid algorithm (a): must be '1', '256', or '512'\"}");
+                    }
+                }
+                
+                if (!doc["d"].isNull()) {
+                    digits = doc["d"].as<uint8_t>();
+                    if (digits != 6 && digits != 8) {
+                        LOG_ERROR("WebServer", "KEY ADD: Invalid digits value: " + String(digits));
+                        return request->send(400, "application/json", "{\"error\":\"Invalid digits (d): must be 6 or 8\"}");
+                    }
+                }
+                
+                if (!doc["p"].isNull()) {
+                    period = doc["p"].as<uint16_t>();
+                    if (period != 30 && period != 60) {
+                        LOG_ERROR("WebServer", "KEY ADD: Invalid period value: " + String(period));
+                        return request->send(400, "application/json", "{\"error\":\"Invalid period (p): must be 30 or 60\"}");
+                    }
+                }
+                
+                if (!doc["c"].isNull()) {
+                    counter = doc["c"].as<uint32_t>();
+                }
+                
+            } else {
+                // 🔙 ОБРАТНАЯ СОВМЕСТИМОСТЬ: Старый FormData формат
+                LOG_INFO("WebServer", "KEY ADD: Parsing FormData format (legacy)");
+                
+                // Парсим FormData вручную
+                int nameStart = bodyStr.indexOf("name=");
+                int secretStart = bodyStr.indexOf("secret=");
+                
+                if (nameStart >= 0 && secretStart >= 0) {
+                    int nameEnd = bodyStr.indexOf("&", nameStart);
+                    if (nameEnd == -1) nameEnd = bodyStr.length();
+                    
+                    int secretEnd = bodyStr.indexOf("&", secretStart);
+                    if (secretEnd == -1) secretEnd = bodyStr.length();
+                    
+                    name = bodyStr.substring(nameStart + 5, nameEnd);
+                    secret = bodyStr.substring(secretStart + 7, secretEnd);
+                    
+                    // URL decode
+                    name.replace("+", " ");
+                    secret.replace("+", " ");
+                    
+                    // Используем значения по умолчанию для старого формата
+                } else {
+                    LOG_ERROR("WebServer", "KEY ADD: Invalid FormData format");
+                    return request->send(400, "text/plain", "Invalid FormData format");
+                }
             }
             
-            LOG_INFO("WebServer", "Key add requested: " + name);
-            keyManager.addKey(name, secret);
+            // === ФИНАЛЬНАЯ ВАЛИДАЦИЯ ===
+            if (name.isEmpty() || secret.isEmpty()) {
+                LOG_ERROR("WebServer", "KEY ADD: Name or secret is empty");
+                return request->send(400, "application/json", "{\"error\":\"Name and secret cannot be empty\"}");
+            }
             
-            JsonDocument doc;
-            doc["status"] = "success";
-            doc["message"] = "Key added successfully";
-            doc["name"] = name;
+            // Валидация Base32 секрета
+            secret.toUpperCase();
+            secret.replace(" ", "");
+            secret.replace("-", "");
+            
+            if (secret.length() < 16) {
+                LOG_ERROR("WebServer", "KEY ADD: Secret too short: " + String(secret.length()));
+                return request->send(400, "application/json", "{\"error\":\"Secret too short (minimum 16 characters)\"}");
+            }
+            
+            // Проверка допустимых символов Base32 (A-Z, 2-7, =)
+            for (size_t i = 0; i < secret.length(); i++) {
+                char c = secret.charAt(i);
+                if (!((c >= 'A' && c <= 'Z') || (c >= '2' && c <= '7') || c == '=')) {
+                    LOG_ERROR("WebServer", "KEY ADD: Invalid Base32 character at position " + String(i));
+                    return request->send(400, "application/json", "{\"error\":\"Invalid Base32 format (use A-Z, 2-7 only)\"}");
+                }
+            }
+            
+            // === ДОБАВЛЕНИЕ КЛЮЧА ===
+            LOG_DEBUG("KeyManager", String("Adding key [Type=") + 
+                     (type == TOTPType::HOTP ? "HOTP" : "TOTP") + 
+                     ", Algo=" + (algorithm == TOTPAlgorithm::SHA1 ? "SHA1" : 
+                                 algorithm == TOTPAlgorithm::SHA256 ? "SHA256" : "SHA512") +
+                     ", Digits=" + String(digits) + 
+                     ", Period=" + String(period) + 
+                     ", Counter=" + String(counter) + "]");
+            
+            bool success;
+            if (type == TOTPType::HOTP || algorithm != TOTPAlgorithm::SHA1 || 
+                digits != 6 || period != 30) {
+                // Используем расширенный метод для нестандартных параметров
+                success = keyManager.addKeyExtended(name, secret, type, algorithm, digits, period);
+            } else {
+                // Используем простой метод для стандартных TOTP ключей (обратная совместимость)
+                success = keyManager.addKey(name, secret);
+            }
+            
+            // === ФОРМИРОВАНИЕ ОТВЕТА ===
+            JsonDocument responseDoc;
+            if (success) {
+                responseDoc["status"] = "success";
+                responseDoc["message"] = "Key added successfully";
+                responseDoc["name"] = name;
+                LOG_INFO("WebServer", "KEY ADD: Success");
+            } else {
+                responseDoc["status"] = "error";
+                responseDoc["message"] = "Failed to add key (duplicate name?)";
+                LOG_ERROR("WebServer", "KEY ADD: Failed");
+            }
+            
             String output;
-            serializeJson(doc, output);
+            serializeJson(responseDoc, output);
             
 #ifdef SECURE_LAYER_ENABLED
             // 🎭 Используем обфусцированные заголовки для response
             String clientId2 = HeaderObfuscationIntegration::getClientId(request, headerObf);
             if (clientId2.length() > 0 && secureLayer.isSecureSessionValid(clientId2)) {
                 LOG_INFO("WebServer", "🔐 KEY ADD ENCRYPTION: Securing response");
-                WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
+                WebServerSecureIntegration::sendSecureResponse(request, success ? 200 : 400, "application/json", output, secureLayer);
                 return;
             }
 #endif
             
-            request->send(200, "application/json", output);
+            request->send(success ? 200 : 400, "application/json", output);
         }
     };
     
@@ -1282,7 +1451,147 @@ void WebServerManager::start() {
         LOG_DEBUG("WebServer", "🔗 Registered obfuscated /api/add -> " + obfuscatedAddPath);
     }
 
-    // API: Get server configuration (timeout, etc.) - SECURE LAYER ENABLED
+    // ==================== API: Show QR Code on Display ====================
+    // Показать QR код TOTP ключа на экране ESP32 для экспорта
+    auto showQrHandler = [this](AsyncWebServerRequest *request) {
+        // Основной обработчик - пустой, вся логика в onBody
+    };
+    
+    auto showQrBodyHandler = [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+        if (index + len == total) {
+            // 🐛 DEBUG: Log raw body first
+            LOG_DEBUG("WebServer", "SHOW_QR body: " + String(len) + " bytes: " + String((char*)data, len));
+            
+            // 1. Аутентификация и CSRF проверка
+            if (!isAuthenticated(request)) return request->send(401, "application/json", "{\"error\":\"Unauthorized\"}");
+            if (!verifyCsrfToken(request)) return request->send(403, "application/json", "{\"error\":\"CSRF token mismatch\"}");
+            
+            int keyIndex = -1;
+            
+#ifdef SECURE_LAYER_ENABLED
+            String clientId = WebServerSecureIntegration::getClientId(request);
+            if (clientId.length() > 0 && secureLayer.isSecureSessionValid(clientId) && 
+                (request->hasHeader("X-Secure-Request") || request->hasHeader("X-Security-Level"))) {
+                
+                LOG_INFO("WebServer", "🔐 SHOW_QR: Decrypting request body for " + clientId.substring(0,8) + "...");
+                
+                // Расшифровываем тело запроса
+                String encryptedBody = String((char*)data, len);
+                String decryptedBody;
+                
+                if (secureLayer.decryptRequest(clientId, encryptedBody, decryptedBody)) {
+                    LOG_DEBUG("WebServer", "🔐 Decrypted show_qr body: " + decryptedBody);
+                    
+                    // Парсим расшифрованные данные (формат: key_id=0)
+                    int keyIdStart = decryptedBody.indexOf("key_id=");
+                    if (keyIdStart >= 0) {
+                        int keyIdEnd = decryptedBody.indexOf("&", keyIdStart);
+                        if (keyIdEnd == -1) keyIdEnd = decryptedBody.length();
+                        
+                        String keyIdStr = decryptedBody.substring(keyIdStart + 7, keyIdEnd); // skip "key_id="
+                        keyIndex = keyIdStr.toInt();
+                        
+                        LOG_DEBUG("WebServer", "🔐 Parsed key_id: " + String(keyIndex));
+                    } else {
+                        return request->send(400, "application/json", "{\"error\":\"Invalid decrypted format\"}");
+                    }
+                } else {
+                    LOG_ERROR("WebServer", "🔐 Failed to decrypt show_qr request body");
+                    return request->send(400, "application/json", "{\"error\":\"Decryption failed\"}");
+                }
+            } else 
+#endif
+            {
+                // Обычный незашифрованный запрос - читаем параметры
+                if (request->hasParam("key_id", true)) {
+                    keyIndex = request->getParam("key_id", true)->value().toInt();
+                } else {
+                    return request->send(400, "application/json", "{\"error\":\"Missing key_id parameter\"}");
+                }
+            }
+            
+            if (keyIndex < 0) {
+                return request->send(400, "application/json", "{\"error\":\"Invalid key index\"}");
+            }
+            
+            // 4. Получить ключ из KeyManager
+            auto keys = keyManager.getAllKeys();
+            if (keyIndex < 0 || keyIndex >= keys.size()) {
+                LOG_ERROR("WebServer", "SHOW_QR: Invalid key index: " + String(keyIndex));
+                return request->send(404, "application/json", "{\"error\":\"Key not found\"}");
+            }
+            
+            TOTPKey key = keys[keyIndex];
+            
+            // КРИТИЧНО: TOTP secret ДОЛЖЕН быть в uppercase (Base32 формат)
+            String secretUpper = key.secret;
+            secretUpper.toUpperCase();
+            
+            // Формируем полный TOTP/HOTP URI с расширенными параметрами
+            String totpUri;
+            if (key.type == TOTPType::HOTP) {
+                // HOTP URI
+                totpUri = "otpauth://hotp/" + key.name + "?secret=" + secretUpper;
+                totpUri += "&counter=" + String(key.counter);
+            } else {
+                // TOTP URI
+                totpUri = "otpauth://totp/" + key.name + "?secret=" + secretUpper;
+                if (key.period != 30) {
+                    totpUri += "&period=" + String(key.period);
+                }
+            }
+            
+            // Добавляем алгоритм (если не SHA1)
+            if (key.algorithm == TOTPAlgorithm::SHA256) {
+                totpUri += "&algorithm=SHA256";
+            } else if (key.algorithm == TOTPAlgorithm::SHA512) {
+                totpUri += "&algorithm=SHA512";
+            }
+            
+            // Добавляем количество цифр (если не 6)
+            if (key.digits != 6) {
+                totpUri += "&digits=" + String(key.digits);
+            }
+            
+            LOG_INFO("WebServer", "SHOW_QR: Displaying QR for key at index " + String(index) + " (type=" + 
+                     (key.type == TOTPType::HOTP ? "HOTP" : "TOTP") + ", algo=SHA" + 
+                     (key.algorithm == TOTPAlgorithm::SHA256 ? "256" : key.algorithm == TOTPAlgorithm::SHA512 ? "512" : "1") + 
+                     ", digits=" + String(key.digits) + ")");
+            
+            // 6. Показать QR на экране (thread-safe request)
+            displayManager.requestShowQRCode(totpUri, 30); // 30 секунд
+            
+            // 7. Отправить ответ
+            JsonDocument responseDoc;
+            responseDoc["success"] = true;
+            responseDoc["message"] = "QR code displayed on device screen for 30 seconds";
+            
+            String response;
+            serializeJson(responseDoc, response);
+            
+#ifdef SECURE_LAYER_ENABLED
+            // Шифруем ответ если была защищенная сессия
+            String clientId2 = WebServerSecureIntegration::getClientId(request);
+            if (clientId2.length() > 0 && secureLayer.isSecureSessionValid(clientId2)) {
+                LOG_INFO("WebServer", "🔐 SHOW_QR ENCRYPTION: Securing response");
+                WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", response, secureLayer);
+                return;
+            }
+#endif
+            request->send(200, "application/json", response);
+        }
+    };
+    
+    // Регистрируем обработчик
+    server.on("/api/show_qr", HTTP_POST, showQrHandler, NULL, showQrBodyHandler);
+    String obfuscatedShowQrPath = urlObfuscation.obfuscateURL("/api/show_qr");
+    if (obfuscatedShowQrPath.length() > 0 && obfuscatedShowQrPath != "/api/show_qr") {
+        server.on(obfuscatedShowQrPath.c_str(), HTTP_POST, showQrHandler, NULL, showQrBodyHandler);
+        LOG_DEBUG("WebServer", "🔗 Registered obfuscated /api/show_qr -> " + obfuscatedShowQrPath);
+    }
+    // ==================== END: Show QR Code ====================
+
+    // API: Get server configuration (timeout, etc.) - SECURE LAYER ENABLED    // API: Get server configuration (timeout, etc.) - SECURE LAYER ENABLED
     server.on("/api/config", HTTP_GET, [this](AsyncWebServerRequest *request){
         if (!isAuthenticated(request)) return request->send(401);
         
@@ -1322,7 +1631,7 @@ void WebServerManager::start() {
     server.on("/api/activity", HTTP_POST, [this](AsyncWebServerRequest *request){
         if (!isAuthenticated(request)) return request->send(401);
         resetActivityTimer();
-        request->send(200, "text/plain", "Activity timer reset");
+        request->send(200, "application/json", "{\"status\":\"success\"}");
     });
 
     server.on("/api/remove", HTTP_POST, [this](AsyncWebServerRequest *request){
@@ -1403,6 +1712,114 @@ void WebServerManager::start() {
         }
     });
 
+    // API: HOTP Generate (increment counter and return new code)
+    auto hotpGenerateHandler = [this](AsyncWebServerRequest *request){
+        // Основной обработчик - пустой, вся логика в onBody callback
+    };
+    
+    auto hotpGenerateBodyHandler = [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+        // onBody callback - обрабатывает тело запроса для расшифровки
+        if (index + len == total) {
+            if (!isAuthenticated(request)) return request->send(401);
+            if (!verifyCsrfToken(request)) return request->send(403, "text/plain", "CSRF token mismatch");
+            
+            resetActivityTimer();
+            
+            int keyIndex = -1;
+            
+#ifdef SECURE_LAYER_ENABLED
+            String clientId = WebServerSecureIntegration::getClientId(request);
+            if (clientId.length() > 0 && secureLayer.isSecureSessionValid(clientId) && 
+                (request->hasHeader("X-Secure-Request") || request->hasHeader("X-Security-Level"))) {
+                
+                LOG_INFO("WebServer", "🔐 HOTP GENERATE: Decrypting request body for " + clientId.substring(0,8) + "...");
+                
+                // Расшифровываем тело запроса
+                String encryptedBody = String((char*)data, len);
+                String decryptedBody;
+                
+                if (secureLayer.decryptRequest(clientId, encryptedBody, decryptedBody)) {
+                    LOG_DEBUG("WebServer", "🔐 Decrypted HOTP generate body: " + decryptedBody);
+                    
+                    // Парсим расшифрованные данные (формат: index=0)
+                    int indexStart = decryptedBody.indexOf("index=");
+                    if (indexStart >= 0) {
+                        int indexEnd = decryptedBody.indexOf("&", indexStart);
+                        if (indexEnd == -1) indexEnd = decryptedBody.length();
+                        
+                        String indexStr = decryptedBody.substring(indexStart + 6, indexEnd); // skip "index="
+                        keyIndex = indexStr.toInt();
+                        
+                        LOG_DEBUG("WebServer", "🔐 Parsed key index: " + String(keyIndex));
+                    } else {
+                        return request->send(400, "text/plain", "Invalid decrypted HOTP generate format");
+                    }
+                } else {
+                    LOG_ERROR("WebServer", "🔐 Failed to decrypt HOTP generate request body");
+                    return request->send(400, "text/plain", "HOTP generate decryption failed");
+                }
+            } else 
+#endif
+            {
+                // Обычный незашифрованный запрос - читаем параметры
+                if (request->hasParam("index", true)) {
+                    keyIndex = request->getParam("index", true)->value().toInt();
+                } else {
+                    return request->send(400, "text/plain", "Missing index parameter");
+                }
+            }
+            
+            if (keyIndex < 0) {
+                return request->send(400, "text/plain", "Invalid key index");
+            }
+            
+            auto keys = keyManager.getAllKeys();
+            if (keyIndex >= keys.size()) {
+                return request->send(400, "text/plain", "Key index out of range");
+            }
+            
+            if (keys[keyIndex].type != TOTPType::HOTP) {
+                return request->send(400, "text/plain", "Key is not HOTP type");
+            }
+            
+            // Инкрементируем счетчик
+            if (!keyManager.incrementHOTPCounter(keyIndex)) {
+                return request->send(500, "text/plain", "Failed to increment HOTP counter");
+            }
+            
+            // Получаем обновленный ключ и генерируем новый код
+            auto updatedKeys = keyManager.getAllKeys();
+            String newCode = totpGenerator.generateCode(updatedKeys[keyIndex]);
+            
+            // Формируем JSON ответ
+            JsonDocument doc;
+            doc["status"] = "success";
+            doc["code"] = newCode;
+            doc["counter"] = updatedKeys[keyIndex].counter;
+            String response;
+            serializeJson(doc, response);
+            
+#ifdef SECURE_LAYER_ENABLED
+            String clientId2 = WebServerSecureIntegration::getClientId(request);
+            if (clientId2.length() > 0 && secureLayer.isSecureSessionValid(clientId2)) {
+                LOG_INFO("WebServer", "🔐 HOTP GENERATE ENCRYPTION: Securing response");
+                WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", response, secureLayer);
+                return;
+            }
+#endif
+            
+            request->send(200, "application/json", response);
+        }
+    };
+    
+    // Регистрируем обработчик
+    server.on("/api/hotp/generate", HTTP_POST, hotpGenerateHandler, NULL, hotpGenerateBodyHandler);
+    String obfuscatedHotpPath = urlObfuscation.obfuscateURL("/api/hotp/generate");
+    if (obfuscatedHotpPath.length() > 0 && obfuscatedHotpPath != "/api/hotp/generate") {
+        server.on(obfuscatedHotpPath.c_str(), HTTP_POST, hotpGenerateHandler, NULL, hotpGenerateBodyHandler);
+        LOG_DEBUG("WebServer", "🔗 Registered obfuscated /api/hotp/generate -> " + obfuscatedHotpPath);
+    }
+
     // Key update endpoint removed for security
     
     // API: Keys reordering (🎭 HEADER OBFUSCATION + 🔗 URL OBFUSCATION + 🔐 XOR ENCRYPTION)
@@ -1435,7 +1852,7 @@ void WebServerManager::start() {
                 String decryptedBody;
                 
                 if (secureLayer.decryptRequest(clientId, encryptedBody, decryptedBody)) {
-                    LOG_DEBUG("WebServer", "🔐 Decrypted body: " + decryptedBody.substring(0, 100) + "...");
+                    LOG_DEBUG("WebServer", "🔐 Decrypted reorder body length: " + String(decryptedBody.length()) + " bytes");
                     body = decryptedBody;
                 } else {
                     LOG_ERROR("WebServer", "🔐 Failed to decrypt request body");
@@ -1587,7 +2004,7 @@ void WebServerManager::start() {
                 String decryptedBody;
                 
                 if (secureLayer.decryptRequest(clientId, encryptedBody, decryptedBody)) {
-                    LOG_DEBUG("WebServer", "🔐 Decrypted password add body: " + decryptedBody.substring(0, 50) + "...");
+                    LOG_DEBUG("WebServer", "🔐 Decrypted password add body length: " + String(decryptedBody.length()) + " bytes");
                     
                     // Парсим расшифрованные данные (формат: name=MyPassword&password=secret123)
                     int nameStart = decryptedBody.indexOf("name=");
@@ -1608,7 +2025,7 @@ void WebServerManager::start() {
                         name.replace("+", " ");
                         password.replace("+", " ");
                         
-                        LOG_DEBUG("WebServer", "🔐 Parsed: name=" + name + ", password=" + password.substring(0, 4) + "...");
+                        LOG_DEBUG("WebServer", "🔐 Parsed password add: name=" + name + ", password length=" + String(password.length()));
                     } else {
                         return request->send(400, "text/plain", "Invalid decrypted password add format");
                     }
@@ -1680,7 +2097,7 @@ void WebServerManager::start() {
                 String decryptedBody;
                 
                 if (secureLayer.decryptRequest(clientId, encryptedBody, decryptedBody)) {
-                    LOG_DEBUG("WebServer", "🔐 Decrypted password delete body: " + decryptedBody);
+                    LOG_DEBUG("WebServer", "🔐 Decrypted password delete body length: " + String(decryptedBody.length()) + " bytes");
                     
                     // Парсим расшифрованные данные (формат: index=0)
                     int indexStart = decryptedBody.indexOf("index=");
@@ -1827,7 +2244,7 @@ void WebServerManager::start() {
                 String decryptedBody;
                 
                 if (secureLayer.decryptRequest(clientId, encryptedBody, decryptedBody)) {
-                    LOG_DEBUG("WebServer", "🔐 Decrypted password update body: " + decryptedBody.substring(0, 50) + "...");
+                    LOG_DEBUG("WebServer", "🔐 Decrypted password update body length: " + String(decryptedBody.length()) + " bytes");
                     
                     // Парсим расшифрованные данные (формат: index=0&name=test&password=pass)
                     int indexStart = decryptedBody.indexOf("index=");
@@ -2007,7 +2424,7 @@ void WebServerManager::start() {
                 String decryptedBody;
                 
                 if (secureLayer.decryptRequest(clientId, encryptedBody, decryptedBody)) {
-                    LOG_DEBUG("WebServer", "🔐 Decrypted password export body: " + decryptedBody.substring(0, 50) + "...");
+                    LOG_DEBUG("WebServer", "🔐 Decrypted password export body length: " + String(decryptedBody.length()) + " bytes");
                     
                     // Парсим расшифрованные данные (формат: password=adminpass)
                     int passwordStart = decryptedBody.indexOf("password=");
@@ -2145,7 +2562,7 @@ void WebServerManager::start() {
                     // Расшифровываем XOR тело запроса
                     String decryptedBody;
                     if (secureLayer.decryptRequest(clientId, body, decryptedBody)) {
-                        LOG_DEBUG("WebServer", "🔐 XOR decrypted passwords import body: " + decryptedBody.substring(0, 100) + "...");
+                        LOG_DEBUG("WebServer", "🔐 XOR decrypted passwords import body length: " + String(decryptedBody.length()) + " bytes");
                         finalBody = decryptedBody;
                     } else {
                         LOG_ERROR("WebServer", "🔐 Failed to XOR decrypt passwords import request body");
@@ -2238,50 +2655,15 @@ void WebServerManager::start() {
         request->send(200, "application/json", output);
     });
     
-    // API: Get URL obfuscation mappings
-    // ⚠️ ВАЖНО: Этот endpoint ПУБЛИЧНЫЙ (без auth)
-    // Mappings нужны ДО keyExchange, а keyExchange - ДО аутентификации
-    // Mappings НЕ содержат секретов + регулярно ротируются (каждые 30 reboot)
-    server.on("/api/url_obfuscation/mappings", HTTP_GET, [this](AsyncWebServerRequest *request){
-        // НЕТ проверки auth - публичный endpoint!
-        
-        LOG_INFO("WebServer", "🔗 URL Obfuscation mappings requested (public)");
-        
-        // Получаем все mappings из URLObfuscationManager
+    // API: Public client bootstrap config - minimal pre-auth mappings
+    server.on("/api/client/config", HTTP_GET, [this](AsyncWebServerRequest *request){
         JsonDocument doc;
-        JsonObject mappings = doc.to<JsonObject>();
-        
-        // Добавляем маппинги для всех важных endpoints
-        std::vector<String> endpoints = {
-            "/api/secure/keyexchange",  // ⚡ ВАЖНО: должен быть ПЕРВЫМ для keyExchange!
-            "/login",                    // 🔐 Login страница - обфусцируем для безопасности
-            "/api/tunnel",
-            "/api/keys",
-            "/api/add",
-            "/api/remove",
-            "/api/keys/reorder",
-            "/api/passwords",
-            "/api/passwords/add",
-            "/api/passwords/delete",
-            "/api/passwords/update",
-            "/api/passwords/get",
-            "/api/passwords/reorder",
-            "/api/config",
-            "/api/pincode_settings"
-        };
-        
-        for (const auto& endpoint : endpoints) {
-            String obfuscatedPath = urlObfuscation.obfuscateURL(endpoint);
-            if (obfuscatedPath.length() > 0 && obfuscatedPath != endpoint) {
-                mappings[endpoint] = obfuscatedPath;
-                // 📉 Убраны DEBUG логи - слишком много вывода
-            }
-        }
+        doc["k"] = urlObfuscation.obfuscateURL("/api/secure/keyexchange");
+        doc["t"] = urlObfuscation.obfuscateURL("/api/tunnel");
+        doc["l"] = urlObfuscation.obfuscateURL("/login");
         
         String output;
         serializeJson(doc, output);
-        
-        LOG_INFO("WebServer", "✅ Sent " + String(mappings.size()) + " URL obfuscation mappings");
         request->send(200, "application/json", output);
     });
 
@@ -2457,9 +2839,9 @@ void WebServerManager::start() {
                 // Смена AP пароля
                 String response;
                 if (configManager.saveApPassword(newPassword)) {
-                    response = "WiFi AP password changed successfully!";
+                    response = "{\"success\":true,\"message\":\"WiFi AP password changed successfully!\"}";
                 } else {
-                    return request->send(500, "text/plain", "Failed to save new AP password.");
+                    return request->send(500, "application/json", "{\"success\":false,\"error\":\"Failed to save new AP password.\"}");
                 }
                 
                 // Отправка зашифрованного ответа
@@ -2616,7 +2998,7 @@ void WebServerManager::start() {
                 String decryptedBody;
                 
                 if (secureLayer.decryptRequest(clientId, encryptedBody, decryptedBody)) {
-                    LOG_DEBUG("WebServer", "🔐 Decrypted export body: " + decryptedBody.substring(0, 50) + "...");
+                    LOG_DEBUG("WebServer", "🔐 Decrypted export body length: " + String(decryptedBody.length()) + " bytes");
                     
                     // Парсим расшифрованные данные (формат: password=adminpass)
                     int passwordStart = decryptedBody.indexOf("password=");
@@ -2695,6 +3077,15 @@ void WebServerManager::start() {
                 JsonObject obj = array.add<JsonObject>();
                 obj["name"] = key.name;
                 obj["secret"] = key.secret;
+                // Добавляем расширенные метаданные
+                obj["type"] = (key.type == TOTPType::HOTP) ? "H" : "T";
+                obj["algorithm"] = (key.algorithm == TOTPAlgorithm::SHA256) ? "256" :
+                                   (key.algorithm == TOTPAlgorithm::SHA512) ? "512" : "1";
+                obj["digits"] = key.digits;
+                obj["period"] = key.period;
+                if (key.counter != 0) {
+                    obj["counter"] = key.counter;
+                }
             }
             String plaintext;
             serializeJson(doc, plaintext);
@@ -2745,7 +3136,7 @@ void WebServerManager::start() {
                 // Расшифровываем XOR тело запроса
                 String decryptedBody;
                 if (secureLayer.decryptRequest(clientId, body, decryptedBody)) {
-                    LOG_DEBUG("WebServer", "🔐 XOR decrypted import body: " + decryptedBody.substring(0, 100) + "...");
+                    LOG_DEBUG("WebServer", "🔐 XOR decrypted import body length: " + String(decryptedBody.length()) + " bytes");
                     finalBody = decryptedBody;
                 } else {
                     LOG_ERROR("WebServer", "🔐 Failed to XOR decrypt import request body");
@@ -2837,11 +3228,30 @@ void WebServerManager::start() {
         }
         
         pinManager.loadPinConfig();
+        
+        // Проверяем текущее состояние device key
+        bool pinProtectionEnabled = CryptoManager::getInstance().isDeviceKeyEncrypted();
+        bool deviceKeyExists = CryptoManager::getInstance().isDeviceKeyFileExists();
+        
+        // Проверяем статус Device BLE PIN
+        bool deviceBlePinEnabled = CryptoManager::getInstance().isDeviceBlePinEnabled();
+        bool deviceBlePinConfigured = CryptoManager::getInstance().isDeviceBlePinConfigured();
+        
+        LOG_INFO("WebServer", "GET /api/pincode_settings: deviceBlePinConfigured=" + String(deviceBlePinConfigured));
+        
         JsonDocument doc;
-        doc["enabled"] = pinManager.isPinEnabled(); // Legacy field
-        doc["enabledForDevice"] = pinManager.isPinEnabledForDevice();
-        doc["enabledForBle"] = pinManager.isPinEnabledForBle();
+        doc["pinProtectionEnabled"] = pinProtectionEnabled;
+        doc["deviceKeyExists"] = deviceKeyExists;
         doc["length"] = pinManager.getPinLength();
+        
+        // Device BLE PIN status
+        doc["deviceBlePinEnabled"] = deviceBlePinEnabled;
+        doc["deviceBlePinConfigured"] = deviceBlePinConfigured;
+        
+        // Legacy fields для обратной совместимости
+        doc["enabled"] = pinProtectionEnabled;
+        doc["enabledForDevice"] = pinProtectionEnabled;
+        
         String response;
         serializeJson(doc, response);
         
@@ -2892,11 +3302,12 @@ void WebServerManager::start() {
             if (!verifyCsrfToken(request)) return request->send(403, "text/plain", "CSRF token mismatch");
             
             // 🔐 ОБРАБОТКА ЗАШИФРОВАННЫХ И ОБЫЧНЫХ ПАРАМЕТРОВ
-            bool enabledForDevice = false;
-            bool enabledForBle = false;
+            bool enablePinProtection = false;
             int pinLength = DEFAULT_PIN_LENGTH;
             String newPin = "";
             String confirmPin = "";
+            String currentPin = ""; // Для отключения PIN
+            bool factoryResetConfirmed = false; // Для подтверждения factory reset
             bool isEncrypted = false;
             
             String clientId = WebServerSecureIntegration::getClientId(request);
@@ -2907,10 +3318,10 @@ void WebServerManager::start() {
                 String decryptedBody;
                 
                 if (secureLayer.decryptRequest(clientId, encryptedBody, decryptedBody)) {
-                    LOG_DEBUG("WebServer", "🔐 Decrypted PIN settings body: " + decryptedBody.substring(0, 50) + "...");
+                    LOG_DEBUG("WebServer", "🔐 Decrypted PIN settings body length: " + String(decryptedBody.length()) + " bytes");
                     isEncrypted = true;
                     
-                    // Парсим расшифрованные данные (формат: enabledForDevice=true&enabledForBle=false&length=6&pin=123456&pin_confirm=123456)
+                    // Парсим расшифрованные данные
                     int pos = 0;
                     while (pos < decryptedBody.length()) {
                         int eqPos = decryptedBody.indexOf('=', pos);
@@ -2927,20 +3338,21 @@ void WebServerManager::start() {
                         value.replace("%26", "&");
                         value.replace("+", " ");
                         
-                        if (key == "enabledForDevice") enabledForDevice = (value == "true");
-                        else if (key == "enabledForBle") enabledForBle = (value == "true");
-                        else if (key == "enabled") {
-                            // Legacy support
-                            enabledForDevice = enabledForBle = (value == "true");
-                        }
+                        if (key == "enablePinProtection") enablePinProtection = (value == "true");
+                        else if (key == "enabledForDevice") enablePinProtection = (value == "true"); // LEGACY
+                        else if (key == "enabled") enablePinProtection = (value == "true"); // LEGACY
                         else if (key == "length") pinLength = value.toInt();
                         else if (key == "pin") newPin = value;
                         else if (key == "pin_confirm") confirmPin = value;
+                        else if (key == "current_pin") currentPin = value;
+                        else if (key == "factory_reset_confirmed") {
+                            factoryResetConfirmed = (value == "true");
+                        }
                         
                         pos = ampPos + 1;
                     }
                     
-                    LOG_INFO("WebServer", "🔐 PIN SETTINGS DECRYPT: device=" + String(enabledForDevice) + ", ble=" + String(enabledForBle) + ", len=" + String(pinLength));
+                    LOG_INFO("WebServer", "🔐 PIN SETTINGS DECRYPT: enable=" + String(enablePinProtection) + ", len=" + String(pinLength));
                 } else {
                     LOG_WARNING("WebServer", "🔐 Failed to decrypt PIN settings data, trying fallback parameters");
                 }
@@ -2948,8 +3360,19 @@ void WebServerManager::start() {
             
             // Fallback: обработка обычных параметров если расшифровка не удалась
             if (!isEncrypted) {
-                enabledForDevice = request->hasParam("enabledForDevice", true) && (request->getParam("enabledForDevice", true)->value() == "true");
-                enabledForBle = request->hasParam("enabledForBle", true) && (request->getParam("enabledForBle", true)->value() == "true");
+                enablePinProtection = request->hasParam("enablePinProtection", true) && (request->getParam("enablePinProtection", true)->value() == "true");
+                
+                // LEGACY: Поддержка старого параметра enabledForDevice
+                if (request->hasParam("enabledForDevice", true)) {
+                    enablePinProtection = request->getParam("enabledForDevice", true)->value() == "true";
+                    LOG_INFO("WebServer", "🔐 PIN SETTINGS: Using legacy parameter enabledForDevice=" + String(enablePinProtection));
+                }
+                
+                // LEGACY: Поддержка старого параметра enabled
+                if (request->hasParam("enabled", true) && !request->hasParam("enablePinProtection", true) && !request->hasParam("enabledForDevice", true)) {
+                    enablePinProtection = request->getParam("enabled", true)->value() == "true";
+                    LOG_INFO("WebServer", "🔐 PIN SETTINGS: Using legacy parameter enabled=" + String(enablePinProtection));
+                }
                 
                 if (request->hasParam("length", true)) {
                     pinLength = request->getParam("length", true)->value().toInt();
@@ -2963,61 +3386,143 @@ void WebServerManager::start() {
                     confirmPin = request->getParam("pin_confirm", true)->value();
                 }
                 
-                // Handle legacy "enabled" parameter for backward compatibility
-                if (request->hasParam("enabled", true) && !request->hasParam("enabledForDevice", true)) {
-                    bool enabled = request->getParam("enabled", true)->value() == "true";
-                    enabledForDevice = enabled;
-                    enabledForBle = enabled;
+                if (request->hasParam("current_pin", true)) {
+                    currentPin = request->getParam("current_pin", true)->value();
                 }
                 
-                LOG_INFO("WebServer", "🔐 PIN SETTINGS FALLBACK: device=" + String(enabledForDevice) + ", ble=" + String(enabledForBle) + ", len=" + String(pinLength));
-            }
-            
-            // Применяем настройки
-            pinManager.setPinEnabledForDevice(enabledForDevice);
-            pinManager.setPinEnabledForBle(enabledForBle);
-            
-            if (pinLength >= 4 && pinLength <= MAX_PIN_LENGTH) {
-                pinManager.setPinLength(pinLength);
+                if (request->hasParam("factory_reset_confirmed", true)) {
+                    factoryResetConfirmed = (request->getParam("factory_reset_confirmed", true)->value() == "true");
+                }
+                
+                LOG_INFO("WebServer", "🔐 PIN SETTINGS FALLBACK: enable=" + String(enablePinProtection) + ", len=" + String(pinLength));
             }
             
             String message;
             int statusCode;
             bool success;
+            bool requiresReboot = false;
             
-            if (enabledForDevice || enabledForBle) {
-                if (newPin.length() > 0) {
-                    if (newPin != confirmPin) {
-                        message = "PINs do not match.";
-                        statusCode = 400;
-                        success = false;
-                    } else {
-                        pinManager.setPin(newPin);
-                        pinManager.saveConfig();
-                        message = "PIN settings updated successfully!";
-                        statusCode = 200;
-                        success = true;
-                        LOG_INFO("WebServer", "PIN settings updated successfully");
-                    }
-                } else {
-                    pinManager.saveConfig();
-                    message = "PIN settings updated successfully!";
-                    statusCode = 200;
-                    success = true;
-                }
-            } else {
-                if (!pinManager.isPinSet()) {
-                    pinManager.setPinEnabledForDevice(false);
-                    pinManager.setPinEnabledForBle(false);
-                    pinManager.saveConfig();
-                    message = "Cannot enable PIN protection without setting a PIN first.";
+            // Проверяем текущее состояние device key
+            bool currentlyEncrypted = CryptoManager::getInstance().isDeviceKeyEncrypted();
+            
+            if (enablePinProtection) {
+                // ВКЛЮЧЕНИЕ PIN ЗАЩИТЫ
+                
+                if (newPin.length() == 0) {
+                    message = "PIN is required to enable protection.";
+                    statusCode = 400;
+                    success = false;
+                } else if (newPin != confirmPin) {
+                    message = "PINs do not match.";
+                    statusCode = 400;
+                    success = false;
+                } else if (newPin.length() < 4 || newPin.length() > 10) {
+                    message = "PIN must be 4-10 digits.";
                     statusCode = 400;
                     success = false;
                 } else {
-                    pinManager.saveConfig();
-                    message = "PIN settings updated successfully!";
+                    if (currentlyEncrypted) {
+                        // Device key уже зашифрован - меняем PIN
+                        LOG_INFO("WebServer", "Changing PIN encryption...");
+                        
+                        if (currentPin.length() == 0) {
+                            message = "Current PIN is required to change PIN.";
+                            statusCode = 400;
+                            success = false;
+                        } else if (CryptoManager::getInstance().changePinEncryption(currentPin, newPin)) {
+                            message = "PIN changed successfully! Device will reboot.";
+                            statusCode = 200;
+                            success = true;
+                            requiresReboot = true;
+                            LOG_INFO("WebServer", "PIN changed successfully");
+                        } else {
+                            message = "Failed to change PIN. Current PIN may be incorrect.";
+                            statusCode = 400;
+                            success = false;
+                            LOG_ERROR("WebServer", "Failed to change PIN");
+                        }
+                    } else {
+                        // Device key не зашифрован - включаем защиту через factory reset
+                        LOG_WARNING("WebServer", "Enabling PIN protection requires factory reset!");
+                        
+                        if (!factoryResetConfirmed) {
+                            message = "WARNING: Enabling PIN protection will perform FACTORY RESET and delete ALL data (TOTP keys, passwords, WiFi). Export your data first! Send 'factory_reset_confirmed=true' to proceed.";
+                            statusCode = 400;
+                            success = false;
+                            LOG_WARNING("WebServer", "Factory reset not confirmed - aborting PIN enable");
+                        } else {
+                            // Удаляем все данные (полная очистка как Hardware Reset)
+                            LOG_INFO("WebServer", "Starting full factory reset...");
+                            
+                            LittleFS.remove(KEYS_FILE);
+                            LittleFS.remove(PASSWORD_FILE);
+                            LittleFS.remove("/wifi_config.json");
+                            LittleFS.remove("/wifi_config.json.enc");
+                            LittleFS.remove("/splash_config.json");
+                            LittleFS.remove(PIN_FILE);
+                            LittleFS.remove(CONFIG_FILE);
+                            LittleFS.remove(DEVICE_KEY_FILE);
+                            LittleFS.remove(BLE_CONFIG_FILE);
+                            LittleFS.remove(WEB_ADMIN_FILE);
+                            LittleFS.remove(MDNS_CONFIG_FILE);
+                            LittleFS.remove(LOGIN_STATE_FILE);
+                            LittleFS.remove("/ble_pin.json.enc");
+                            LittleFS.remove("/session.json.enc");
+                            
+                            // URL Obfuscation: Удаление boot counter и всех mappings
+                            LOG_INFO("WebServer", "Clearing URL obfuscation data...");
+                            LittleFS.remove("/boot_counter.txt");
+                            
+                            // Удаляем все url_mappings_*.json файлы
+                            fs::File root = LittleFS.open("/", "r");
+                            if (root) {
+                                fs::File file = root.openNextFile();
+                                while (file) {
+                                    String filename = String(file.name());
+                                    if (filename.startsWith("/url_mappings_") && filename.endsWith(".json")) {
+                                        LOG_DEBUG("WebServer", "Removing URL mapping file: " + filename);
+                                        LittleFS.remove(filename);
+                                    }
+                                    file = root.openNextFile();
+                                }
+                            }
+                            
+                            // Очистка NVS partition (BLE bonding keys)
+                            LOG_INFO("WebServer", "Clearing NVS partition...");
+                            nvs_flash_erase_partition("nvs");
+                            
+                            LOG_INFO("WebServer", "All data files deleted for factory reset");
+                            
+                            // Длина PIN выбирается на устройстве при первой загрузке
+                            
+                            message = "Factory reset completed! Device will reboot. On next boot, choose PIN length and create PIN on device screen.";
+                            statusCode = 200;
+                            success = true;
+                            requiresReboot = true;
+                            LOG_INFO("WebServer", "Factory reset completed - device will prompt for PIN length and PIN on next boot");
+                        }
+                    }
+                }
+            } else {
+                // ОТКЛЮЧЕНИЕ PIN ЗАЩИТЫ
+                
+                if (!currentlyEncrypted) {
+                    message = "PIN protection is already disabled.";
+                    statusCode = 200;
+                    success = false;
+                    LOG_INFO("WebServer", "PIN protection already disabled");
+                } else {
+                    // Новая логика: устанавливаем глобальный флаг для запроса PIN на устройстве
+                    LOG_INFO("WebServer", "PIN disable requested - will prompt on device");
+                    
+                    extern bool shouldPromptPinDisable;
+                    shouldPromptPinDisable = true;
+                    
+                    message = "Please enter PIN on device to confirm. Check device screen.";
                     statusCode = 200;
                     success = true;
+                    requiresReboot = false; // Не перезагружаем сразу
+                    LOG_INFO("WebServer", "PIN disable flag set - device will prompt for PIN");
                 }
             }
             
@@ -3025,8 +3530,15 @@ void WebServerManager::start() {
             JsonDocument doc;
             doc["success"] = success;
             doc["message"] = message;
+            doc["requiresReboot"] = requiresReboot;
             String response;
             serializeJson(doc, response);
+            
+            // Если требуется перезагрузка, планируем её
+            if (requiresReboot && success) {
+                extern bool shouldRestart;
+                shouldRestart = true;
+            }
 
 #ifdef SECURE_LAYER_ENABLED
             // 🔐 ЗАШИФРОВАННЫЙ ОТВЕТ для PIN настроек
@@ -3070,8 +3582,13 @@ void WebServerManager::start() {
             if (!verifyCsrfToken(request)) return request->send(403, "text/plain", "CSRF token mismatch");
             
             // 🔐 ОБРАБОТКА ЗАШИФРОВАННЫХ И ОБЫЧНЫХ ПАРАМЕТРОВ
-            String blePinStr = "";
+            String bleBondingPinStr = "";
+            String deviceBlePinStr = "";
+            bool deviceBlePinEnabled = false;
+            bool deviceBlePinEnabledProvided = false; // Флаг что параметр был передан
             bool isEncrypted = false;
+            bool hasBondingPin = false;
+            bool hasDevicePin = false;
             
             String clientId = WebServerSecureIntegration::getClientId(request);
             
@@ -3081,10 +3598,10 @@ void WebServerManager::start() {
                 String decryptedBody;
                 
                 if (secureLayer.decryptRequest(clientId, encryptedBody, decryptedBody)) {
-                    LOG_DEBUG("WebServer", "🔐 Decrypted BLE PIN body: " + decryptedBody.substring(0, 30) + "...");
+                    LOG_DEBUG("WebServer", "🔐 [MAIN] Decrypted BLE PIN body: " + decryptedBody.substring(0, 100));
                     isEncrypted = true;
                     
-                    // Парсим расшифрованные данные (формат: ble_pin=123456)
+                    // Парсим расшифрованные данные
                     int pos = 0;
                     while (pos < decryptedBody.length()) {
                         int eqPos = decryptedBody.indexOf('=', pos);
@@ -3101,12 +3618,21 @@ void WebServerManager::start() {
                         value.replace("%26", "&");
                         value.replace("+", " ");
                         
-                        if (key == "ble_pin") blePinStr = value;
+                        if (key == "ble_bonding_pin") {
+                            bleBondingPinStr = value;
+                            hasBondingPin = (value.length() > 0 && value != "null");
+                        } else if (key == "device_ble_pin") {
+                            deviceBlePinStr = value;
+                            hasDevicePin = (value.length() > 0 && value != "null");
+                        } else if (key == "device_ble_pin_enabled") {
+                            deviceBlePinEnabled = (value == "true");
+                            deviceBlePinEnabledProvided = (value.length() > 0 && value != "null"); // Параметр был передан
+                        }
                         
                         pos = ampPos + 1;
                     }
                     
-                    LOG_INFO("WebServer", "🔐 BLE PIN DECRYPT: pin=[HIDDEN]");
+                    LOG_INFO("WebServer", "🔐 BLE PIN DECRYPT: bonding=" + String(hasBondingPin) + ", device=" + String(hasDevicePin));
                 } else {
                     LOG_WARNING("WebServer", "🔐 Failed to decrypt BLE PIN data, trying fallback parameters");
                 }
@@ -3114,58 +3640,135 @@ void WebServerManager::start() {
             
             // Fallback: обработка обычных параметров если расшифровка не удалась
             if (!isEncrypted) {
-                if (!request->hasParam("ble_pin", true)) {
-                    return request->send(400, "text/plain", "BLE PIN parameter is required");
+                if (request->hasParam("ble_bonding_pin", true)) {
+                    bleBondingPinStr = request->getParam("ble_bonding_pin", true)->value();
+                    hasBondingPin = (bleBondingPinStr.length() > 0 && bleBondingPinStr != "null");
+                    LOG_DEBUG("WebServer", "BLE Bonding PIN received, length=" + String(bleBondingPinStr.length()));
                 }
-                blePinStr = request->getParam("ble_pin", true)->value();
-                LOG_INFO("WebServer", "🔐 BLE PIN FALLBACK: Using unencrypted parameter");
+                if (request->hasParam("device_ble_pin", true)) {
+                    deviceBlePinStr = request->getParam("device_ble_pin", true)->value();
+                    hasDevicePin = (deviceBlePinStr.length() > 0 && deviceBlePinStr != "null");
+                }
+                if (request->hasParam("device_ble_pin_enabled", true)) {
+                    String deviceBlePinEnabledValue = request->getParam("device_ble_pin_enabled", true)->value();
+                    deviceBlePinEnabled = (deviceBlePinEnabledValue == "true");
+                    deviceBlePinEnabledProvided = (deviceBlePinEnabledValue.length() > 0 && deviceBlePinEnabledValue != "null"); // Параметр был передан
+                }
+                LOG_INFO("WebServer", "🔐 BLE PIN FALLBACK: bonding=" + String(hasBondingPin) + ", device=" + String(hasDevicePin));
             }
             
             String message;
-            int statusCode;
-            bool success;
+            int statusCode = 200;
+            bool success = true;
             
-            // Validate PIN format (6 digits)
-            if (blePinStr.length() != 6) {
-                message = "BLE PIN must be exactly 6 digits";
-                statusCode = 400;
-                success = false;
-            } else {
-                bool validDigits = true;
-                for (char c : blePinStr) {
-                    if (!isdigit(c)) {
-                        validDigits = false;
-                        break;
-                    }
-                }
-                
-                if (!validDigits) {
-                    message = "BLE PIN must contain only digits";
+            LOG_INFO("WebServer", "🔐 [MAIN] BLE PIN UPDATE: hasBondingPin=" + String(hasBondingPin) + ", hasDevicePin=" + String(hasDevicePin));
+            
+            // Обработка BLE Bonding PIN
+            if (hasBondingPin) {
+                if (bleBondingPinStr.length() != 6) {
+                    message = "BLE Bonding PIN must be exactly 6 digits";
                     statusCode = 400;
                     success = false;
                 } else {
-                    uint32_t blePin = blePinStr.toInt();
-                    
-                    // Save the new BLE PIN through CryptoManager
-                    if (CryptoManager::getInstance().saveBlePin(blePin)) {
-                        LOG_INFO("WebServer", "BLE PIN updated successfully");
-                        
-                        // Clear all BLE bonding keys when PIN changes for security
-                        if (bleKeyboardManager) {
-                            bleKeyboardManager->clearBondingKeys();
-                            LOG_INFO("WebServer", "BLE bonding keys cleared due to PIN change");
+                    bool validDigits = true;
+                    for (char c : bleBondingPinStr) {
+                        if (!isdigit(c)) {
+                            validDigits = false;
+                            break;
                         }
-                        
-                        message = "BLE PIN updated successfully! All BLE clients cleared.";
-                        statusCode = 200;
-                        success = true;
-                    } else {
-                        LOG_ERROR("WebServer", "Failed to save BLE PIN");
-                        message = "Failed to save BLE PIN";
-                        statusCode = 500;
+                    }
+                    
+                    if (!validDigits) {
+                        message = "BLE Bonding PIN must contain only digits";
+                        statusCode = 400;
                         success = false;
+                    } else {
+                        uint32_t blePin = bleBondingPinStr.toInt();
+                        
+                        if (CryptoManager::getInstance().saveBlePin(blePin)) {
+                            LOG_INFO("WebServer", "BLE Bonding PIN updated successfully");
+                            
+                            // Clear all BLE bonding keys when PIN changes for security
+                            if (bleKeyboardManager) {
+                                bleKeyboardManager->clearBondingKeys();
+                                LOG_INFO("WebServer", "BLE bonding keys cleared due to PIN change");
+                            }
+                            
+                            message = "BLE Bonding PIN updated successfully! All BLE clients cleared.";
+                        } else {
+                            LOG_ERROR("WebServer", "Failed to save BLE Bonding PIN");
+                            message = "Failed to save BLE Bonding PIN";
+                            statusCode = 500;
+                            success = false;
+                        }
                     }
                 }
+            }
+            
+            // Обработка Device BLE PIN
+            if (success && hasDevicePin) {
+                if (deviceBlePinStr.length() != 6) {
+                    message = "Device BLE PIN must be exactly 6 digits";
+                    statusCode = 400;
+                    success = false;
+                } else {
+                    bool validDigits = true;
+                    for (char c : deviceBlePinStr) {
+                        if (!isdigit(c)) {
+                            validDigits = false;
+                            break;
+                        }
+                    }
+                    
+                    if (!validDigits) {
+                        message = "Device BLE PIN must contain only digits";
+                        statusCode = 400;
+                        success = false;
+                    } else {
+                        uint32_t devicePin = deviceBlePinStr.toInt();
+                        
+                        // Валидация: PIN не должен быть меньше 0 (но 000000 это валидный PIN = 0)
+                        // Проверяем что строка действительно была "000000" а не пустая
+                        if (deviceBlePinStr == "000000") {
+                            devicePin = 0; // Явно устанавливаем 0 для PIN 000000
+                        }
+                        
+                        LOG_INFO("WebServer", "Device BLE PIN validated, saving (value protected)");
+                        
+                        if (CryptoManager::getInstance().saveDeviceBlePin(devicePin)) {
+                            LOG_INFO("WebServer", "Device BLE PIN updated successfully");
+                            
+                            if (hasBondingPin) {
+                                message += " Device BLE PIN also updated.";
+                            } else {
+                                message = "Device BLE PIN updated successfully!";
+                            }
+                        } else {
+                            LOG_ERROR("WebServer", "Failed to save Device BLE PIN");
+                            message = "Failed to save Device BLE PIN";
+                            statusCode = 500;
+                            success = false;
+                        }
+                    }
+                }
+            } else if (success && !hasDevicePin && deviceBlePinEnabledProvided && deviceBlePinEnabled == false) {
+                // Выключение Device BLE PIN (только enabled=false без PIN, и параметр ЯВНО передан)
+                if (CryptoManager::getInstance().isDeviceBlePinConfigured()) {
+                    CryptoManager::getInstance().setDeviceBlePinEnabled(false);
+                    LOG_INFO("WebServer", "Device BLE PIN disabled successfully");
+                    message = "Device BLE PIN disabled successfully!";
+                    hasDevicePin = true; // Помечаем что операция выполнена
+                } else {
+                    message = "Device BLE PIN not configured";
+                    statusCode = 400;
+                    success = false;
+                }
+            }
+            
+            if (!hasBondingPin && !hasDevicePin) {
+                message = "No PIN parameters provided";
+                statusCode = 400;
+                success = false;
             }
             
             // Формируем JSON ответ
@@ -3198,6 +3801,66 @@ void WebServerManager::start() {
     if (obfuscatedBlePinUpdatePath.length() > 0 && obfuscatedBlePinUpdatePath != "/api/ble_pin_update") {
         server.on(obfuscatedBlePinUpdatePath.c_str(), HTTP_POST, blePinUpdateHandler, NULL, blePinUpdateBodyHandler);
     }
+
+    // Clock Settings endpoints
+    server.on("/api/clock_settings", HTTP_GET, [this](AsyncWebServerRequest *request){
+        if (!isAuthenticated(request)) return request->send(401);
+        if (!verifyCsrfToken(request)) return request->send(403);
+        
+        JsonDocument doc;
+        doc["timezone"] = configManager.getTimezone();
+        String response;
+        serializeJson(doc, response);
+        
+#ifdef SECURE_LAYER_ENABLED
+        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", response, secureLayer);
+#else
+        request->send(200, "application/json", response);
+#endif
+    });
+
+    server.on("/api/clock_settings", HTTP_POST, [this](AsyncWebServerRequest *request){
+        if (!isAuthenticated(request)) return request->send(401);
+        if (!verifyCsrfToken(request)) return request->send(403);
+        if (request->hasHeader("X-User-Activity")) resetActivityTimer();
+        
+        String tz = "";
+        if (request->hasParam("timezone", true)) {
+            tz = request->getParam("timezone", true)->value();
+        }
+        
+        JsonDocument doc;
+        String response;
+        int statusCode = 200;
+        
+        if (tz.length() == 0) {
+            doc["success"] = false;
+            doc["message"] = "Missing timezone parameter!";
+            statusCode = 400;
+        } else if (tz.length() > 64) {
+            doc["success"] = false;
+            doc["message"] = "Invalid timezone value!";
+            statusCode = 400;
+        } else if (configManager.saveTimezone(tz)) {
+            setenv("TZ", tz.c_str(), 1);
+            tzset();
+            LOG_INFO("WebServer", "🕐 Timezone changed to: " + tz);
+            doc["success"] = true;
+            doc["message"] = "Timezone saved successfully!";
+            doc["timezone"] = tz;
+        } else {
+            doc["success"] = false;
+            doc["message"] = "Failed to save timezone!";
+            statusCode = 500;
+        }
+        
+        serializeJson(doc, response);
+#ifdef SECURE_LAYER_ENABLED
+        WebServerSecureIntegration::sendSecureResponse(request, statusCode, "application/json", response, secureLayer);
+#else
+        request->send(statusCode, "application/json", response);
+#endif
+    });
 
     // Display Settings endpoints
     server.on("/api/display_settings", HTTP_GET, [this](AsyncWebServerRequest *request){
@@ -3328,74 +3991,24 @@ void WebServerManager::start() {
             }
         });
 
-    // API: Clear BLE Clients (POST with encryption)
+    // API: Clear BLE Clients (POST)
     server.on("/api/clear_ble_clients", HTTP_POST,
         [this](AsyncWebServerRequest *request){
             LOG_INFO("WebServer", "🔐 CLEAR_BLE: Main handler called");
+            if (!isAuthenticated(request)) return request->send(401);
+            if (!verifyCsrfToken(request)) return request->send(403, "text/plain", "CSRF mismatch");
+            
+            if (bleKeyboardManager) {
+                bleKeyboardManager->clearBondingKeys();
+                LOG_INFO("WebServer", "BLE bonding keys cleared");
+                request->send(200, "application/json", "{\"success\":true,\"message\":\"BLE clients cleared\"}");
+            } else {
+                request->send(500, "application/json", "{\"success\":false,\"message\":\"BLE manager unavailable\"}");
+            }
         },
         NULL,
-        [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-            if (!data || len == 0) {
-                LOG_ERROR("WebServer", "🔐 CLEAR_BLE: Invalid data");
-                return request->send(400, "text/plain", "Invalid request data");
-            }
-            
-            LOG_INFO("WebServer", "🔐 CLEAR_BLE: onBody called - len=" + String(len));
-            
-            if (index + len == total) {
-                if (!isAuthenticated(request)) {
-                    return request->send(401, "text/plain", "Unauthorized");
-                }
-                if (!verifyCsrfToken(request)) {
-                    return request->send(403, "text/plain", "CSRF token mismatch");
-                }
-                
-#ifdef SECURE_LAYER_ENABLED
-                String clientId = WebServerSecureIntegration::getClientId(request);
-                
-                if (clientId.length() > 0 && 
-                    secureLayer.isSecureSessionValid(clientId) &&
-                    (request->hasHeader("X-Secure-Request") || 
-                     request->hasHeader("X-Security-Level"))) {
-                    
-                    LOG_INFO("WebServer", "🔐 CLEAR_BLE: Processing encrypted request");
-                    
-                    // Выполняем очистку BLE
-                    String responseMsg;
-                    bool success = false;
-                    
-                    if (bleKeyboardManager) {
-                        bleKeyboardManager->clearBondingKeys();
-                        LOG_INFO("WebServer", "BLE bonding keys cleared manually");
-                        responseMsg = "{\"success\":true,\"message\":\"BLE clients cleared\"}";
-                        success = true;
-                    } else {
-                        LOG_ERROR("WebServer", "BLE Keyboard Manager not available");
-                        responseMsg = "{\"success\":false,\"message\":\"BLE Manager not available\"}";
-                    }
-                    
-                    // Шифруем ответ
-                    String encryptedResponse;
-                    if (secureLayer.encryptResponse(clientId, responseMsg, encryptedResponse)) {
-                        request->send(success ? 200 : 500, "application/json", encryptedResponse);
-                    } else {
-                        request->send(500, "text/plain", "Encryption failed");
-                    }
-                    return;
-                }
-#endif
-                
-                // Fallback: незашифрованный
-                if (bleKeyboardManager) {
-                    bleKeyboardManager->clearBondingKeys();
-                    LOG_INFO("WebServer", "BLE bonding keys cleared manually");
-                    request->send(200, "text/plain", "BLE clients cleared successfully!");
-                } else {
-                    LOG_ERROR("WebServer", "BLE Keyboard Manager not available");
-                    request->send(500, "text/plain", "BLE Keyboard Manager not available");
-                }
-            }
-        });
+        NULL
+    );
 
     server.on("/api/theme", HTTP_GET, [this](AsyncWebServerRequest *request){
         if (!isAuthenticated(request)) return request->send(401);
@@ -4237,8 +4850,28 @@ void WebServerManager::start() {
                     for (size_t i = 0; i < keys.size(); i++) {
                         JsonObject keyObj = keysArray.add<JsonObject>();
                         keyObj["name"] = keys[i].name;
-                        keyObj["code"] = blockTOTP ? "NOT SYNCED" : totpGenerator.generateTOTP(keys[i].secret);
-                        keyObj["timeLeft"] = totpGenerator.getTimeRemaining();
+                        // HOTP works without time sync, TOTP requires it
+                        if (keys[i].type == TOTPType::HOTP) {
+                            keyObj["code"] = totpGenerator.generateCode(keys[i]);
+                        } else {
+                            keyObj["code"] = blockTOTP ? "NOT SYNCED" : totpGenerator.generateCode(keys[i]);
+                        }
+                        
+                        if (keys[i].type == TOTPType::TOTP) {
+                            keyObj["timeLeft"] = totpGenerator.getTimeRemaining(keys[i].period);
+                        } else {
+                            keyObj["timeLeft"] = 0;
+                        }
+                        
+                        // Метаданные (всегда включаем)
+                        keyObj["t"] = (keys[i].type == TOTPType::HOTP) ? "H" : "T";
+                        keyObj["a"] = (keys[i].algorithm == TOTPAlgorithm::SHA256) ? "256" :
+                                      (keys[i].algorithm == TOTPAlgorithm::SHA512) ? "512" : "1";
+                        keyObj["d"] = keys[i].digits;
+                        keyObj["p"] = keys[i].period;
+                        if (keys[i].counter != 0) {
+                            keyObj["c"] = keys[i].counter;
+                        }
                     }
                     
                     String response;
@@ -4251,21 +4884,123 @@ void WebServerManager::start() {
                 
                 // 🎯 МАРШРУТИЗАЦИЯ: /api/add POST
                 if (targetEndpoint == "/api/add" && targetMethod == "POST") {
-                    String name = targetData["name"].as<String>();
-                    String secret = targetData["secret"].as<String>();
+                    // 🆕 Поддержка нового компактного формата и старого
+                    String name, secret;
+                    TOTPType type = TOTPType::TOTP;
+                    TOTPAlgorithm algo = TOTPAlgorithm::SHA1;
+                    uint8_t digits = 6;
+                    uint16_t period = 30;
                     
-                    if (name.isEmpty() || secret.isEmpty()) {
-                        return request->send(400, "text/plain", "Name and secret cannot be empty");
+                    if (!targetData["n"].isNull() && !targetData["s"].isNull()) {
+                        // Новый компактный формат
+                        name = targetData["n"].as<String>();
+                        secret = targetData["s"].as<String>();
+                        
+                        // Парсим опциональные параметры
+                        if (!targetData["t"].isNull() && targetData["t"].as<String>() == "H") {
+                            type = TOTPType::HOTP;
+                        }
+                        
+                        if (!targetData["a"].isNull()) {
+                            String algoStr = targetData["a"].as<String>();
+                            if (algoStr == "256") algo = TOTPAlgorithm::SHA256;
+                            else if (algoStr == "512") algo = TOTPAlgorithm::SHA512;
+                        }
+                        
+                        if (!targetData["d"].isNull()) {
+                            digits = targetData["d"].as<uint8_t>();
+                        }
+                        
+                        if (!targetData["p"].isNull()) {
+                            period = targetData["p"].as<uint16_t>();
+                        }
+                        
+                        LOG_INFO("WebServer", "🚇 TUNNELED Key add (extended): " + name);
+                        
+                        bool success;
+                        if (type == TOTPType::HOTP || algo != TOTPAlgorithm::SHA1 || 
+                            digits != 6 || period != 30) {
+                            success = keyManager.addKeyExtended(name, secret, type, algo, digits, period);
+                        } else {
+                            success = keyManager.addKey(name, secret);
+                        }
+                        
+                        String output = success ? 
+                            "{\"status\":\"success\",\"message\":\"Key added successfully\",\"name\":\"" + name + "\"}" :
+                            "{\"status\":\"error\",\"message\":\"Failed to add key\"}";
+                        
+                        LOG_INFO("WebServer", "🔐 KEY ADD ENCRYPTION: Securing tunneled response");
+                        WebServerSecureIntegration::sendSecureResponse(request, success ? 200 : 400, "application/json", output, secureLayer);
+                        return;
+                        
+                    } else if (!targetData["name"].isNull() && !targetData["secret"].isNull()) {
+                        // Старый формат (обратная совместимость)
+                        name = targetData["name"].as<String>();
+                        secret = targetData["secret"].as<String>();
+                        
+                        if (name.isEmpty() || secret.isEmpty()) {
+                            return request->send(400, "text/plain", "Name and secret cannot be empty");
+                        }
+                        
+                        LOG_INFO("WebServer", "🚇 TUNNELED Key add (legacy): " + name);
+                        keyManager.addKey(name, secret);
+                        
+                        String output = "{\"status\":\"success\",\"message\":\"Key added successfully\",\"name\":\"" + name + "\"}";
+                        
+                        LOG_INFO("WebServer", "🔐 KEY ADD ENCRYPTION: Securing tunneled response");
+                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
+                        return;
+                    } else {
+                        return request->send(400, "text/plain", "Missing required fields");
+                    }
+                }
+                
+                // 🎯 МАРШРУТИЗАЦИЯ: /api/show_qr POST
+                if (targetEndpoint == "/api/show_qr" && targetMethod == "POST") {
+                    int keyIndex = targetData["key_id"].as<int>();
+                    
+                    auto keys = keyManager.getAllKeys();
+                    if (keyIndex < 0 || keyIndex >= keys.size()) {
+                        LOG_ERROR("WebServer", "🚇 TUNNELED SHOW_QR: Invalid key index: " + String(keyIndex));
+                        String output = "{\"error\":\"Key not found\"}";
+                        WebServerSecureIntegration::sendSecureResponse(request, 404, "application/json", output, secureLayer);
+                        return;
                     }
                     
-                    LOG_INFO("WebServer", "🚇 TUNNELED Key add: " + name);
-                    keyManager.addKey(name, secret);
+                    TOTPKey key = keys[keyIndex];
                     
-                    // 🛡️ Ручное формирование JSON для экономии памяти
-                    String output = "{\"status\":\"success\",\"message\":\"Key added successfully\",\"name\":\"" + name + "\"}";
+                    // TOTP secret в uppercase (Base32 формат)
+                    String secretUpper = key.secret;
+                    secretUpper.toUpperCase();
                     
+                    // Формируем полный TOTP/HOTP URI с расширенными параметрами
+                    String totpUri;
+                    if (key.type == TOTPType::HOTP) {
+                        totpUri = "otpauth://hotp/" + key.name + "?secret=" + secretUpper;
+                        totpUri += "&counter=" + String(key.counter);
+                    } else {
+                        totpUri = "otpauth://totp/" + key.name + "?secret=" + secretUpper;
+                        if (key.period != 30) {
+                            totpUri += "&period=" + String(key.period);
+                        }
+                    }
                     
-                    LOG_INFO("WebServer", "🔐 KEY ADD ENCRYPTION: Securing tunneled response");
+                    if (key.algorithm == TOTPAlgorithm::SHA256) {
+                        totpUri += "&algorithm=SHA256";
+                    } else if (key.algorithm == TOTPAlgorithm::SHA512) {
+                        totpUri += "&algorithm=SHA512";
+                    }
+                    
+                    if (key.digits != 6) {
+                        totpUri += "&digits=" + String(key.digits);
+                    }
+                    
+                    LOG_INFO("WebServer", "🚇 TUNNELED SHOW_QR: Displaying QR for key at index " + String(index));
+                    displayManager.requestShowQRCode(totpUri, 30);
+                    
+                    String output = "{\"success\":true,\"message\":\"QR code displayed on device screen for 30 seconds\"}";
+                    
+                    LOG_INFO("WebServer", "🔐 SHOW_QR ENCRYPTION: Securing tunneled response");
                     WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
                     return;
                 }
@@ -4282,6 +5017,36 @@ void WebServerManager::start() {
                     
                     
                     LOG_INFO("WebServer", "🔐 KEY REMOVE ENCRYPTION: Securing tunneled response");
+                    WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
+                    return;
+                }
+                
+                // 🎯 МАРШРУТИЗАЦИЯ: /api/hotp/generate POST
+                if (targetEndpoint == "/api/hotp/generate" && targetMethod == "POST") {
+                    int index = targetData["index"].as<int>();
+                    
+                    auto keys = keyManager.getAllKeys();
+                    if (index < 0 || index >= keys.size()) {
+                        return request->send(400, "text/plain", "Invalid key index");
+                    }
+                    
+                    if (keys[index].type != TOTPType::HOTP) {
+                        return request->send(400, "text/plain", "Key is not HOTP type");
+                    }
+                    
+                    LOG_INFO("WebServer", "🚇 TUNNELED HOTP generate: index=" + String(index));
+                    
+                    if (!keyManager.incrementHOTPCounter(index)) {
+                        return request->send(500, "text/plain", "Failed to increment HOTP counter");
+                    }
+                    
+                    auto updatedKeys = keyManager.getAllKeys();
+                    String newCode = totpGenerator.generateCode(updatedKeys[index]);
+                    
+                    // 🛡️ Ручное формирование JSON
+                    String output = "{\"status\":\"success\",\"code\":\"" + newCode + "\",\"counter\":" + String(updatedKeys[index].counter) + "}";
+                    
+                    LOG_INFO("WebServer", "🔐 HOTP GENERATE ENCRYPTION: Securing tunneled response");
                     WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
                     return;
                 }
@@ -4352,27 +5117,27 @@ void WebServerManager::start() {
                         JsonObject obj = array.add<JsonObject>();
                         obj["name"] = key.name;
                         obj["secret"] = key.secret;
+                        // Добавляем расширенные метаданные
+                        obj["type"] = (key.type == TOTPType::HOTP) ? "H" : "T";
+                        obj["algorithm"] = (key.algorithm == TOTPAlgorithm::SHA256) ? "256" :
+                                           (key.algorithm == TOTPAlgorithm::SHA512) ? "512" : "1";
+                        obj["digits"] = key.digits;
+                        obj["period"] = key.period;
+                        if (key.counter != 0) {
+                            obj["counter"] = key.counter;
+                        }
                     }
                     String plaintext;
                     serializeJson(doc, plaintext);
                     
                     String encryptedContent = CryptoManager::getInstance().encryptWithPassword(plaintext, password);
                     
-                    LOG_INFO("WebServer", "💾 TOTP EXPORT: Wrapping encrypted file in JSON for tunnel [TUNNELED]");
-                    // КРИТИЧНО: Для туннелирования отправляем JSON с fileContent
-                    // Файл уже зашифрован CryptoManager, НЕ нужно XOR!
-                    // ArduinoJson 7 автоматически управляет памятью
-                    JsonDocument responseDoc;
-                    responseDoc["status"] = "success";
-                    responseDoc["message"] = "Export successful";
-                    responseDoc["fileContent"] = encryptedContent;  // Зашифрованный файл
-                    responseDoc["filename"] = "encrypted_keys_backup.json";
+                    LOG_INFO("WebServer", "💾 TOTP EXPORT: Sending encrypted file directly [TUNNELED]");
+                    // Файл уже зашифрован CryptoManager, отправляем напрямую
+                    // Не нужно оборачивать в JSON - encryptedContent уже JSON
                     
-                    String jsonResponse;
-                    serializeJson(responseDoc, jsonResponse);
-                    
-                    // Отправляем через XOR шифрование (только wrapper, не файл)
-                    WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", jsonResponse, secureLayer);
+                    // Отправляем через XOR шифрование
+                    WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", encryptedContent, secureLayer);
                     return;
                 }
                 
@@ -4481,19 +5246,12 @@ void WebServerManager::start() {
                     
                     String encryptedContent = CryptoManager::getInstance().encryptWithPassword(plaintext, password);
                     
-                    LOG_INFO("WebServer", "💾 PASSWORDS EXPORT: Wrapping encrypted file in JSON for tunnel [TUNNELED]");
-                    // КРИТИЧНО: Для туннелирования отправляем JSON с fileContent
-                    JsonDocument responseDoc;
-                    responseDoc["status"] = "success";
-                    responseDoc["message"] = "Export successful";
-                    responseDoc["fileContent"] = encryptedContent;
-                    responseDoc["filename"] = "encrypted_passwords_backup.json";
-                    
-                    String jsonResponse;
-                    serializeJson(responseDoc, jsonResponse);
+                    LOG_INFO("WebServer", "💾 PASSWORDS EXPORT: Sending encrypted file directly [TUNNELED]");
+                    // Файл уже зашифрован CryptoManager, отправляем напрямую
+                    // Не нужно оборачивать в JSON - encryptedContent уже JSON
                     
                     // Отправляем через XOR шифрование
-                    WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", jsonResponse, secureLayer);
+                    WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", encryptedContent, secureLayer);
                     return;
                 }
                 
@@ -4770,6 +5528,51 @@ void WebServerManager::start() {
                     return;
                 }
                 
+                // 🎯 МАРШРУТИЗАЦИЯ: /api/clock_settings GET
+                if (targetEndpoint == "/api/clock_settings" && targetMethod == "GET") {
+                    JsonDocument doc;
+                    doc["timezone"] = configManager.getTimezone();
+                    String response;
+                    serializeJson(doc, response);
+                    WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", response, secureLayer);
+                    return;
+                }
+                
+                // 🎯 МАРШРУТИЗАЦИЯ: /api/clock_settings POST
+                if (targetEndpoint == "/api/clock_settings" && targetMethod == "POST") {
+                    if (request->hasHeader("X-User-Activity")) resetActivityTimer();
+                    
+                    String tz = targetData["timezone"].as<String>();
+                    JsonDocument doc;
+                    String response;
+                    int statusCode = 200;
+                    
+                    if (tz.length() == 0) {
+                        doc["success"] = false;
+                        doc["message"] = "Missing timezone parameter!";
+                        statusCode = 400;
+                    } else if (tz.length() > 64) {
+                        doc["success"] = false;
+                        doc["message"] = "Invalid timezone value!";
+                        statusCode = 400;
+                    } else if (configManager.saveTimezone(tz)) {
+                        setenv("TZ", tz.c_str(), 1);
+                        tzset();
+                        LOG_INFO("WebServer", "🚇 Tunneled timezone changed to: " + tz);
+                        doc["success"] = true;
+                        doc["message"] = "Timezone saved successfully!";
+                        doc["timezone"] = tz;
+                    } else {
+                        doc["success"] = false;
+                        doc["message"] = "Failed to save timezone!";
+                        statusCode = 500;
+                    }
+                    
+                    serializeJson(doc, response);
+                    WebServerSecureIntegration::sendSecureResponse(request, statusCode, "application/json", response, secureLayer);
+                    return;
+                }
+                
                 // 🎯 МАРШРУТИЗАЦИЯ: /api/display_settings POST
                 if (targetEndpoint == "/api/display_settings" && targetMethod == "POST") {
                     if (request->hasHeader("X-User-Activity")) {
@@ -4833,15 +5636,32 @@ void WebServerManager::start() {
                     }
                     
                     pinManager.loadPinConfig();
+                    
+                    // Проверяем текущее состояние device key
+                    bool pinProtectionEnabled = CryptoManager::getInstance().isDeviceKeyEncrypted();
+                    bool deviceKeyExists = CryptoManager::getInstance().isDeviceKeyFileExists();
+                    
+                    // Проверяем статус Device BLE PIN
+                    bool deviceBlePinEnabled = CryptoManager::getInstance().isDeviceBlePinEnabled();
+                    bool deviceBlePinConfigured = CryptoManager::getInstance().isDeviceBlePinConfigured();
+                    
                     JsonDocument doc;
-                    doc["enabled"] = pinManager.isPinEnabled(); // Legacy field
-                    doc["enabledForDevice"] = pinManager.isPinEnabledForDevice();
-                    doc["enabledForBle"] = pinManager.isPinEnabledForBle();
+                    doc["pinProtectionEnabled"] = pinProtectionEnabled;
+                    doc["deviceKeyExists"] = deviceKeyExists;
                     doc["length"] = pinManager.getPinLength();
+                    
+                    // Device BLE PIN status
+                    doc["deviceBlePinEnabled"] = deviceBlePinEnabled;
+                    doc["deviceBlePinConfigured"] = deviceBlePinConfigured;
+                    
+                    // Legacy fields для обратной совместимости
+                    doc["enabled"] = pinProtectionEnabled;
+                    doc["enabledForDevice"] = pinProtectionEnabled;
+                    
                     String output;
                     serializeJson(doc, output);
                     
-                    LOG_INFO("WebServer", "🚇 TUNNELED pincode_settings GET: device=" + String(pinManager.isPinEnabledForDevice()) + ", ble=" + String(pinManager.isPinEnabledForBle()));
+                    LOG_INFO("WebServer", "🚇 TUNNELED pincode_settings GET");
                     LOG_INFO("WebServer", "🔐 PINCODE_SETTINGS GET ENCRYPTION: Securing tunneled response [TUNNELED]");
                     WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
                     return;
@@ -4853,67 +5673,151 @@ void WebServerManager::start() {
                         resetActivityTimer();
                     }
                     
-                    bool enabledForDevice = targetData["enabledForDevice"].as<bool>();
+                    bool enablePinProtection = targetData["enabledForDevice"].as<bool>();
                     bool enabledForBle = targetData["enabledForBle"].as<bool>();
                     int pinLength = targetData["length"].as<int>();
                     String newPin = targetData["pin"].as<String>();
                     String confirmPin = targetData["pin_confirm"].as<String>();
+                    String currentPin = targetData["current_pin"].as<String>();
+                    bool factoryResetConfirmed = targetData["factory_reset_confirmed"].as<bool>();
                     
-                    LOG_INFO("WebServer", "🚇 TUNNELED PIN settings update: device=" + String(enabledForDevice) + ", ble=" + String(enabledForBle) + ", len=" + String(pinLength));
-                    
-                    // Применяем настройки
-                    pinManager.setPinEnabledForDevice(enabledForDevice);
-                    pinManager.setPinEnabledForBle(enabledForBle);
-                    
-                    if (pinLength >= 4 && pinLength <= MAX_PIN_LENGTH) {
-                        pinManager.setPinLength(pinLength);
-                    }
+                    LOG_INFO("WebServer", "🚇 TUNNELED PIN settings update: device=" + String(enablePinProtection) + ", ble=" + String(enabledForBle) + ", len=" + String(pinLength));
                     
                     String message;
                     int statusCode;
                     bool success;
+                    bool requiresReboot = false;
                     
-                    if (enabledForDevice || enabledForBle) {
-                        if (newPin.length() > 0) {
-                            if (newPin != confirmPin) {
-                                message = "PINs do not match.";
+                    // Проверяем текущее состояние device key
+                    bool currentlyEncrypted = CryptoManager::getInstance().isDeviceKeyEncrypted();
+                    
+                    if (enablePinProtection) {
+                        // ВКЛЮЧЕНИЕ PIN ЗАЩИТЫ
+                        
+                        if (currentlyEncrypted) {
+                            // Device key уже зашифрован - меняем PIN
+                            LOG_INFO("WebServer", "🚇 TUNNELED: Changing PIN encryption...");
+                            
+                            if (currentPin.length() == 0) {
+                                message = "Current PIN is required to change PIN.";
                                 statusCode = 400;
                                 success = false;
-                            } else {
-                                pinManager.setPin(newPin);
-                                pinManager.saveConfig();
-                                message = "PIN settings updated successfully!";
+                            } else if (CryptoManager::getInstance().changePinEncryption(currentPin, newPin)) {
+                                message = "PIN changed successfully! Device will reboot.";
                                 statusCode = 200;
                                 success = true;
-                                LOG_INFO("WebServer", "🚇 TUNNELED PIN settings updated successfully");
+                                requiresReboot = true;
+                                LOG_INFO("WebServer", "🚇 TUNNELED: PIN changed successfully");
+                            } else {
+                                message = "Failed to change PIN. Current PIN may be incorrect.";
+                                statusCode = 400;
+                                success = false;
+                                LOG_ERROR("WebServer", "🚇 TUNNELED: Failed to change PIN");
                             }
                         } else {
-                            pinManager.saveConfig();
-                            message = "PIN settings updated successfully!";
-                            statusCode = 200;
-                            success = true;
+                            // Device key не зашифрован - включаем защиту через factory reset
+                            LOG_WARNING("WebServer", "🚇 TUNNELED: Enabling PIN protection requires factory reset!");
+                            
+                            if (!factoryResetConfirmed) {
+                                message = "WARNING: Enabling PIN protection will perform FACTORY RESET and delete ALL data (TOTP keys, passwords, WiFi). Export your data first! Send 'factory_reset_confirmed=true' to proceed.";
+                                statusCode = 400;
+                                success = false;
+                                LOG_WARNING("WebServer", "🚇 TUNNELED: Factory reset not confirmed - aborting PIN enable");
+                            } else {
+                                // Удаляем все данные (полная очистка как Hardware Reset)
+                                LOG_INFO("WebServer", "🚇 TUNNELED: Starting full factory reset...");
+                                
+                                LittleFS.remove(KEYS_FILE);
+                                LittleFS.remove(PASSWORD_FILE);
+                                LittleFS.remove("/wifi_config.json");
+                                LittleFS.remove("/wifi_config.json.enc");
+                                LittleFS.remove("/splash_config.json");
+                                LittleFS.remove(PIN_FILE);
+                                LittleFS.remove(CONFIG_FILE);
+                                LittleFS.remove(DEVICE_KEY_FILE);
+                                LittleFS.remove(BLE_CONFIG_FILE);
+                                LittleFS.remove(WEB_ADMIN_FILE);
+                                LittleFS.remove(MDNS_CONFIG_FILE);
+                                LittleFS.remove(LOGIN_STATE_FILE);
+                                LittleFS.remove("/ble_pin.json.enc");
+                                LittleFS.remove("/session.json.enc");
+                                
+                                // URL Obfuscation: Удаление boot counter и всех mappings
+                                LOG_INFO("WebServer", "🚇 TUNNELED: Clearing URL obfuscation data...");
+                                LittleFS.remove("/boot_counter.txt");
+                                
+                                // Удаляем все url_mappings_*.json файлы
+                                fs::File root = LittleFS.open("/", "r");
+                                if (root) {
+                                    fs::File file = root.openNextFile();
+                                    while (file) {
+                                        String filename = String(file.name());
+                                        if (filename.startsWith("/url_mappings_") && filename.endsWith(".json")) {
+                                            LOG_DEBUG("WebServer", "🚇 TUNNELED: Removing URL mapping file: " + filename);
+                                            LittleFS.remove(filename);
+                                        }
+                                        file = root.openNextFile();
+                                    }
+                                }
+                                
+                                // Очистка NVS partition (BLE bonding keys)
+                                LOG_INFO("WebServer", "🚇 TUNNELED: Clearing NVS partition...");
+                                nvs_flash_erase_partition("nvs");
+                                
+                                LOG_INFO("WebServer", "🚇 TUNNELED: All data files deleted for factory reset");
+                                
+                                // НЕ создаем ключ здесь - устройство создаст его при следующей загрузке
+                                // и запросит PIN на физическом экране
+                                
+                                // Длина PIN выбирается на устройстве при первой загрузке
+                                
+                                message = "Factory reset completed! Device will reboot. On next boot, choose PIN length and create PIN on device screen.";
+                                statusCode = 200;
+                                success = true;
+                                requiresReboot = true;
+                                LOG_INFO("WebServer", "🚇 TUNNELED: Factory reset completed - device will prompt for PIN length and PIN on next boot");
+                            }
                         }
                     } else {
-                        if (!pinManager.isPinSet()) {
-                            pinManager.setPinEnabledForDevice(false);
-                            pinManager.setPinEnabledForBle(false);
-                            pinManager.saveConfig();
-                            message = "Cannot enable PIN protection without setting a PIN first.";
-                            statusCode = 400;
+                        // ОТКЛЮЧЕНИЕ PIN ЗАЩИТЫ
+                        
+                        if (!currentlyEncrypted) {
+                            message = "PIN protection is already disabled.";
+                            statusCode = 200;
                             success = false;
+                            LOG_INFO("WebServer", "🚇 TUNNELED: PIN protection already disabled");
                         } else {
-                            pinManager.saveConfig();
-                            message = "PIN settings updated successfully!";
+                            // Новая логика: устанавливаем глобальный флаг для запроса PIN на устройстве
+                            LOG_INFO("WebServer", "🚇 TUNNELED: PIN disable requested - will prompt on device");
+                            
+                            extern bool shouldPromptPinDisable;
+                            shouldPromptPinDisable = true;
+                            
+                            message = "Please enter PIN on device to confirm. Check device screen.";
                             statusCode = 200;
                             success = true;
+                            requiresReboot = false; // Не перезагружаем сразу
+                            LOG_INFO("WebServer", "🚇 TUNNELED: PIN disable flag set - device will prompt for PIN");
                         }
                     }
                     
+                    // BLE PIN настройки (независимо от device PIN)
+                    pinManager.setPinEnabledForBle(enabledForBle);
+                    pinManager.saveConfig();
+                    
+                    // Формируем JSON ответ
                     JsonDocument doc;
                     doc["success"] = success;
                     doc["message"] = message;
+                    doc["requiresReboot"] = requiresReboot;
                     String response;
                     serializeJson(doc, response);
+                    
+                    // Если требуется перезагрузка, планируем её
+                    if (requiresReboot && success) {
+                        extern bool shouldRestart;
+                        shouldRestart = true;
+                    }
                     
                     LOG_INFO("WebServer", "🔐 PINCODE_SETTINGS POST ENCRYPTION: Securing tunneled response [TUNNELED]");
                     WebServerSecureIntegration::sendSecureResponse(request, statusCode, "application/json", response, secureLayer);
@@ -4922,55 +5826,133 @@ void WebServerManager::start() {
                 
                 // 🎯 МАРШРУТИЗАЦИЯ: /api/ble_pin_update POST
                 if (targetEndpoint == "/api/ble_pin_update" && targetMethod == "POST") {
-                    String blePinStr = targetData["ble_pin"].as<String>();
+                    // DEBUG: Логируем весь targetData
+                    String targetDataDebug;
+                    serializeJson(targetData, targetDataDebug);
+                    LOG_DEBUG("WebServer", "🚇 [TUNNELED] targetData JSON: " + targetDataDebug);
                     
-                    LOG_INFO("WebServer", "🚇 TUNNELED BLE PIN update: pin=[HIDDEN]");
+                    // Новая логика: поддержка двух типов PIN
+                    String bleBondingPinStr = targetData["ble_bonding_pin"].as<String>();
+                    String deviceBlePinStr = targetData["device_ble_pin"].as<String>();
+                    String deviceBlePinEnabledStr = targetData["device_ble_pin_enabled"].as<String>();
+                    bool deviceBlePinEnabled = (deviceBlePinEnabledStr == "true");
+                    bool deviceBlePinEnabledProvided = (deviceBlePinEnabledStr.length() > 0 && deviceBlePinEnabledStr != "null"); // Параметр был передан
+                    
+                    // Проверка на null/пустые значения
+                    bool hasBondingPin = (bleBondingPinStr.length() > 0 && bleBondingPinStr != "null");
+                    bool hasDevicePin = (deviceBlePinStr.length() > 0 && deviceBlePinStr != "null");
+                    
+                    LOG_INFO("WebServer", "🚇 TUNNELED BLE PIN update: bonding=" + String(hasBondingPin) + ", device=" + String(hasDevicePin));
+                    LOG_DEBUG("WebServer", "🚇 PIN values protected in logs");
                     
                     String message;
-                    int statusCode;
-                    bool success;
+                    int statusCode = 200;
+                    bool success = true;
                     
-                    // Validate PIN format (6 digits)
-                    if (blePinStr.length() != 6) {
-                        message = "BLE PIN must be exactly 6 digits";
-                        statusCode = 400;
-                        success = false;
-                    } else {
-                        bool validDigits = true;
-                        for (char c : blePinStr) {
-                            if (!isdigit(c)) {
-                                validDigits = false;
-                                break;
-                            }
-                        }
-                        
-                        if (!validDigits) {
-                            message = "BLE PIN must contain only digits";
+                    // Обработка BLE Bonding PIN
+                    if (hasBondingPin) {
+                        if (bleBondingPinStr.length() != 6) {
+                            message = "BLE Bonding PIN must be exactly 6 digits";
                             statusCode = 400;
                             success = false;
                         } else {
-                            uint32_t blePin = blePinStr.toInt();
-                            
-                            // Save the new BLE PIN through CryptoManager
-                            if (CryptoManager::getInstance().saveBlePin(blePin)) {
-                                LOG_INFO("WebServer", "🚇 TUNNELED BLE PIN updated successfully");
-                                
-                                // Clear all BLE bonding keys when PIN changes for security
-                                if (bleKeyboardManager) {
-                                    bleKeyboardManager->clearBondingKeys();
-                                    LOG_INFO("WebServer", "🚇 TUNNELED BLE bonding keys cleared");
+                            bool validDigits = true;
+                            for (char c : bleBondingPinStr) {
+                                if (!isdigit(c)) {
+                                    validDigits = false;
+                                    break;
                                 }
-                                
-                                message = "BLE PIN updated successfully! All BLE clients cleared.";
-                                statusCode = 200;
-                                success = true;
-                            } else {
-                                LOG_ERROR("WebServer", "🚇 TUNNELED Failed to save BLE PIN");
-                                message = "Failed to save BLE PIN";
-                                statusCode = 500;
+                            }
+                            
+                            if (!validDigits) {
+                                message = "BLE Bonding PIN must contain only digits";
+                                statusCode = 400;
                                 success = false;
+                            } else {
+                                uint32_t blePin = bleBondingPinStr.toInt();
+                                
+                                if (CryptoManager::getInstance().saveBlePin(blePin)) {
+                                    LOG_INFO("WebServer", "🚇 TUNNELED BLE Bonding PIN updated successfully");
+                                    
+                                    // Clear all BLE bonding keys when PIN changes for security
+                                    if (bleKeyboardManager) {
+                                        bleKeyboardManager->clearBondingKeys();
+                                        LOG_INFO("WebServer", "🚇 TUNNELED BLE bonding keys cleared");
+                                    }
+                                    
+                                    message = "BLE Bonding PIN updated successfully! All BLE clients cleared.";
+                                } else {
+                                    LOG_ERROR("WebServer", "🚇 TUNNELED Failed to save BLE Bonding PIN");
+                                    message = "Failed to save BLE Bonding PIN";
+                                    statusCode = 500;
+                                    success = false;
+                                }
                             }
                         }
+                    }
+                    
+                    // Обработка Device BLE PIN
+                    if (success && hasDevicePin) {
+                        if (deviceBlePinStr.length() != 6) {
+                            message = "Device BLE PIN must be exactly 6 digits";
+                            statusCode = 400;
+                            success = false;
+                        } else {
+                            bool validDigits = true;
+                            for (char c : deviceBlePinStr) {
+                                if (!isdigit(c)) {
+                                    validDigits = false;
+                                    break;
+                                }
+                            }
+                            
+                            if (!validDigits) {
+                                message = "Device BLE PIN must contain only digits";
+                                statusCode = 400;
+                                success = false;
+                            } else {
+                                uint32_t devicePin = deviceBlePinStr.toInt();
+                                
+                                if (deviceBlePinStr == "000000") {
+                                    devicePin = 0;
+                                }
+                                
+                                LOG_INFO("WebServer", "🚇 Device BLE PIN validated, saving (value protected)");
+                                
+                                if (CryptoManager::getInstance().saveDeviceBlePin(devicePin)) {
+                                    LOG_INFO("WebServer", "🚇 TUNNELED Device BLE PIN updated successfully");
+                                    
+                                    if (hasBondingPin) {
+                                        message += " Device BLE PIN also updated.";
+                                    } else {
+                                        message = "Device BLE PIN updated successfully!";
+                                    }
+                                } else {
+                                    LOG_ERROR("WebServer", "🚇 TUNNELED Failed to save Device BLE PIN");
+                                    message = "Failed to save Device BLE PIN";
+                                    statusCode = 500;
+                                    success = false;
+                                }
+                            }
+                        }
+                    } else if (success && !hasDevicePin && deviceBlePinEnabledProvided && deviceBlePinEnabled == false) {
+                        // Выключение Device BLE PIN (только enabled=false без PIN, и параметр ЯВНО передан)
+                        if (CryptoManager::getInstance().isDeviceBlePinConfigured()) {
+                            CryptoManager::getInstance().setDeviceBlePinEnabled(false);
+                            LOG_INFO("WebServer", "🚇 TUNNELED Device BLE PIN disabled successfully");
+                            message = "Device BLE PIN disabled successfully!";
+                            hasDevicePin = true; // Помечаем что операция выполнена
+                        } else {
+                            message = "Device BLE PIN not configured";
+                            statusCode = 400;
+                            success = false;
+                        }
+                    }
+                    
+                    if (!hasBondingPin && !hasDevicePin) {
+                        message = "No PIN parameters provided";
+                        statusCode = 400;
+                        success = false;
                     }
                     
                     JsonDocument doc;
@@ -4979,8 +5961,25 @@ void WebServerManager::start() {
                     String response;
                     serializeJson(doc, response);
                     
-                    LOG_INFO("WebServer", "🔐 BLE_PIN_UPDATE POST ENCRYPTION: Securing tunneled response [TUNNELED]");
+                    LOG_INFO("WebServer", "🔐 BLE_PIN_UPDATE POST ENCRYPTION: Securing tunneled response, success=" + String(success));
                     WebServerSecureIntegration::sendSecureResponse(request, statusCode, "application/json", response, secureLayer);
+                    return;
+                }
+                
+                // 🎯 МАРШРУТИЗАЦИЯ: /api/clear_ble_clients POST
+                if (targetEndpoint == "/api/clear_ble_clients" && targetMethod == "POST") {
+                    LOG_INFO("WebServer", "🚇 TUNNELED Clear BLE clients request");
+                    
+                    if (bleKeyboardManager) {
+                        bleKeyboardManager->clearBondingKeys();
+                        LOG_INFO("WebServer", "🚇 TUNNELED BLE bonding keys cleared successfully");
+                        
+                        String output = "{\"success\":true,\"message\":\"BLE clients cleared successfully!\"}";
+                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
+                    } else {
+                        String output = "{\"success\":false,\"message\":\"BLE manager not available\"}";
+                        WebServerSecureIntegration::sendSecureResponse(request, 500, "application/json", output, secureLayer);
+                    }
                     return;
                 }
                 
@@ -5237,11 +6236,13 @@ void WebServerManager::start() {
                     
                     String output;
                     if (configManager.saveApPassword(newPassword)) {
-                        output = "WiFi AP password changed successfully!";
-                        LOG_INFO("WebServer", "AP password changed successfully");
-                        WebServerSecureIntegration::sendSecureResponse(request, 200, "text/plain", output, secureLayer);
+                        output = "{\"success\":true,\"message\":\"WiFi AP password updated. Device will restart in 3 seconds...\",\"restart\":true}";
+                        LOG_INFO("WebServer", "AP password changed successfully - scheduling restart");
+                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
+                        delay(3000);
+                        ESP.restart();
                     } else {
-                        return request->send(500, "text/plain", "Failed to save new AP password.");
+                        return request->send(500, "application/json", "{\"success\":false,\"error\":\"Failed to save new AP password.\"}");
                     }
                     return;
                 }
@@ -5272,6 +6273,14 @@ void WebServerManager::start() {
                     
                     delay(1000);
                     ESP.restart();
+                    return;
+                }
+                
+                // Activity timer reset
+                if (targetEndpoint == "/api/activity" && targetMethod == "POST") {
+                    if (!isAuthenticated(request)) return request->send(401);
+                    resetActivityTimer();
+                    request->send(200, "application/json", "{\"status\":\"success\"}");
                     return;
                 }
                 
@@ -5372,7 +6381,7 @@ void WebServerManager::start() {
                     request->send(400, "text/plain", "Failed to decrypt method header");
                     return;
                 }
-                LOG_INFO("WebServer", "🔗 Obfuscated tunnel: " + realMethod + " [Client:" + 
+                LOG_DEBUG("WebServer", "🔗 Obfuscated tunnel: " + realMethod + " [Client:" + 
                          (clientId.length() > 0 ? clientId.substring(0,8) + "...]" : "NONE]"));
 #ifdef SECURE_LAYER_ENABLED
                 String encryptedBody = *bufferPtr;
@@ -5393,7 +6402,7 @@ void WebServerManager::start() {
                     String targetMethod = tunnelDoc["method"] | realMethod;
                     JsonObject targetData = tunnelDoc["data"].as<JsonObject>();
                     
-                    LOG_INFO("WebServer", "🎯 Obfuscated: " + targetMethod + " " + targetEndpoint);
+                    LOG_DEBUG("WebServer", "🎯 Obfuscated: " + targetMethod + " " + targetEndpoint);
                     
                     // /api/keys GET
                     if (targetEndpoint == "/api/keys" && targetMethod == "GET") {
@@ -5415,8 +6424,28 @@ void WebServerManager::start() {
                         for (size_t i = 0; i < keys.size(); i++) {
                             JsonObject keyObj = keysArray.add<JsonObject>();
                             keyObj["name"] = keys[i].name;
-                            keyObj["code"] = blockTOTP ? "NOT SYNCED" : totpGenerator.generateTOTP(keys[i].secret);
-                            keyObj["timeLeft"] = totpGenerator.getTimeRemaining();
+                            // HOTP works without time sync, TOTP requires it
+                            if (keys[i].type == TOTPType::HOTP) {
+                                keyObj["code"] = totpGenerator.generateCode(keys[i]);
+                            } else {
+                                keyObj["code"] = blockTOTP ? "NOT SYNCED" : totpGenerator.generateCode(keys[i]);
+                            }
+                            
+                            if (keys[i].type == TOTPType::TOTP) {
+                                keyObj["timeLeft"] = totpGenerator.getTimeRemaining(keys[i].period);
+                            } else {
+                                keyObj["timeLeft"] = 0;
+                            }
+                            
+                            // Метаданные (всегда включаем)
+                            keyObj["t"] = (keys[i].type == TOTPType::HOTP) ? "H" : "T";
+                            keyObj["a"] = (keys[i].algorithm == TOTPAlgorithm::SHA256) ? "256" :
+                                          (keys[i].algorithm == TOTPAlgorithm::SHA512) ? "512" : "1";
+                            keyObj["d"] = keys[i].digits;
+                            keyObj["p"] = keys[i].period;
+                            if (keys[i].counter != 0) {
+                                keyObj["c"] = keys[i].counter;
+                            }
                         }
                         String response;
                         serializeJson(doc, response);
@@ -5442,7 +6471,7 @@ void WebServerManager::start() {
                             newOrder.push_back(std::make_pair(name, order));
                         }
                         
-                        LOG_INFO("WebServer", "🔗 Obfuscated Keys reorder: " + String(newOrder.size()) + " keys");
+                        LOG_DEBUG("WebServer", "🔗 Obfuscated Keys reorder: " + String(newOrder.size()) + " keys");
                         bool success = keyManager.reorderKeys(newOrder);
                         
                         String output;
@@ -5450,7 +6479,7 @@ void WebServerManager::start() {
                         if (success) {
                             output = "{\"status\":\"success\",\"message\":\"Keys reordered successfully!\"}";
                             statusCode = 200;
-                            LOG_INFO("WebServer", "🔗 Obfuscated keys reordered successfully");
+                            LOG_DEBUG("WebServer", "🔗 Obfuscated keys reordered successfully");
                         } else {
                             output = "{\"status\":\"error\",\"message\":\"Failed to reorder keys\"}";
                             statusCode = 500;
@@ -5465,20 +6494,118 @@ void WebServerManager::start() {
                     
                     // /api/add POST
                     if (targetEndpoint == "/api/add" && targetMethod == "POST") {
-                        String name = targetData["name"].as<String>();
-                        String secret = targetData["secret"].as<String>();
+                        // 🆕 Поддержка нового компактного формата и старого
+                        String name, secret;
+                        TOTPType type = TOTPType::TOTP;
+                        TOTPAlgorithm algo = TOTPAlgorithm::SHA1;
+                        uint8_t digits = 6;
+                        uint16_t period = 30;
+                        bool useExtended = false;
                         
-                        LOG_INFO("WebServer", "🚇 OBFUSCATED Key add: " + name);
+                        if (!targetData["n"].isNull() && !targetData["s"].isNull()) {
+                            // Новый компактный формат
+                            name = targetData["n"].as<String>();
+                            secret = targetData["s"].as<String>();
+                            
+                            if (!targetData["t"].isNull() && targetData["t"].as<String>() == "H") {
+                                type = TOTPType::HOTP;
+                                useExtended = true;
+                            }
+                            
+                            if (!targetData["a"].isNull()) {
+                                String algoStr = targetData["a"].as<String>();
+                                if (algoStr == "256") { algo = TOTPAlgorithm::SHA256; useExtended = true; }
+                                else if (algoStr == "512") { algo = TOTPAlgorithm::SHA512; useExtended = true; }
+                            }
+                            
+                            if (!targetData["d"].isNull()) {
+                                digits = targetData["d"].as<uint8_t>();
+                                if (digits != 6) useExtended = true;
+                            }
+                            
+                            if (!targetData["p"].isNull()) {
+                                period = targetData["p"].as<uint16_t>();
+                                if (period != 30) useExtended = true;
+                            }
+                        } else if (!targetData["name"].isNull() && !targetData["secret"].isNull()) {
+                            // Старый формат
+                            name = targetData["name"].as<String>();
+                            secret = targetData["secret"].as<String>();
+                        } else {
+                            String output = "{\"status\":\"error\",\"message\":\"Missing required fields\"}";
+                            WebServerSecureIntegration::sendSecureResponse(request, 400, "application/json", output, secureLayer);
+                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                            return;
+                        }
                         
-                        if (keyManager.addKey(name, secret)) {
-                            LOG_INFO("WebServer", "🚇 OBFUSCATED Key added successfully: " + name);
+                        LOG_DEBUG("WebServer", "🚇 OBFUSCATED Key add request");
+                        
+                        bool success;
+                        if (useExtended) {
+                            success = keyManager.addKeyExtended(name, secret, type, algo, digits, period);
+                        } else {
+                            success = keyManager.addKey(name, secret);
+                        }
+                        
+                        if (success) {
+                            LOG_DEBUG("WebServer", "🚇 OBFUSCATED Key added successfully");
                             String output = "{\"status\":\"success\",\"message\":\"Key added successfully\"}";
                             WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
                         } else {
-                            LOG_ERROR("WebServer", "🚇 OBFUSCATED Failed to add key: " + name);
+                            LOG_ERROR("WebServer", "🚇 OBFUSCATED Failed to add key");
                             String output = "{\"status\":\"error\",\"message\":\"Failed to add key\"}";
                             WebServerSecureIntegration::sendSecureResponse(request, 500, "application/json", output, secureLayer);
                         }
+                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                        return;
+                    }
+                    
+                    // /api/show_qr POST
+                    if (targetEndpoint == "/api/show_qr" && targetMethod == "POST") {
+                        int keyIndex = targetData["key_id"].as<int>();
+                        
+                        auto keys = keyManager.getAllKeys();
+                        if (keyIndex < 0 || keyIndex >= keys.size()) {
+                            LOG_ERROR("WebServer", "🔗 OBFUSCATED SHOW_QR: Invalid key index: " + String(keyIndex));
+                            String output = "{\"error\":\"Key not found\"}";
+                            WebServerSecureIntegration::sendSecureResponse(request, 404, "application/json", output, secureLayer);
+                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                            return;
+                        }
+                        
+                        TOTPKey key = keys[keyIndex];
+                        
+                        // TOTP secret в uppercase
+                        String secretUpper = key.secret;
+                        secretUpper.toUpperCase();
+                        
+                        // Формируем полный TOTP/HOTP URI с расширенными параметрами
+                        String totpUri;
+                        if (key.type == TOTPType::HOTP) {
+                            totpUri = "otpauth://hotp/" + key.name + "?secret=" + secretUpper;
+                            totpUri += "&counter=" + String(key.counter);
+                        } else {
+                            totpUri = "otpauth://totp/" + key.name + "?secret=" + secretUpper;
+                            if (key.period != 30) {
+                                totpUri += "&period=" + String(key.period);
+                            }
+                        }
+                        
+                        if (key.algorithm == TOTPAlgorithm::SHA256) {
+                            totpUri += "&algorithm=SHA256";
+                        } else if (key.algorithm == TOTPAlgorithm::SHA512) {
+                            totpUri += "&algorithm=SHA512";
+                        }
+                        
+                        if (key.digits != 6) {
+                            totpUri += "&digits=" + String(key.digits);
+                        }
+                        
+                        LOG_DEBUG("WebServer", "🔗 OBFUSCATED SHOW_QR: Displaying QR for key at index " + String(index));
+                        displayManager.requestShowQRCode(totpUri, 30);
+                        
+                        String output = "{\"success\":true,\"message\":\"QR code displayed on device screen for 30 seconds\"}";
+                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
                         if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
                         return;
                     }
@@ -5487,7 +6614,7 @@ void WebServerManager::start() {
                     if (targetEndpoint == "/api/remove" && targetMethod == "POST") {
                         int index = targetData["index"].as<int>();
                         
-                        LOG_INFO("WebServer", "🚇 OBFUSCATED Key remove: index=" + String(index));
+                        LOG_DEBUG("WebServer", "🚇 OBFUSCATED Key remove: index=" + String(index));
                         keyManager.removeKey(index);
                         
                         // 🛡️ Ручное формирование JSON
@@ -5499,15 +6626,66 @@ void WebServerManager::start() {
                         return;
                     }
                     
+                    // /api/hotp/generate POST
+                    if (targetEndpoint == "/api/hotp/generate" && targetMethod == "POST") {
+                        int index = targetData["index"].as<int>();
+                        
+                        auto keys = keyManager.getAllKeys();
+                        if (index < 0 || index >= keys.size()) {
+                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                            return request->send(400, "text/plain", "Invalid key index");
+                        }
+                        
+                        if (keys[index].type != TOTPType::HOTP) {
+                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                            return request->send(400, "text/plain", "Key is not HOTP type");
+                        }
+                        
+                        LOG_DEBUG("WebServer", "🚇 OBFUSCATED HOTP generate: index=" + String(index));
+                        
+                        if (!keyManager.incrementHOTPCounter(index)) {
+                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                            return request->send(500, "text/plain", "Failed to increment HOTP counter");
+                        }
+                        
+                        auto updatedKeys = keyManager.getAllKeys();
+                        String newCode = totpGenerator.generateCode(updatedKeys[index]);
+                        
+                        // 🛡️ Ручное формирование JSON
+                        String output = "{\"status\":\"success\",\"code\":\"" + newCode + "\",\"counter\":" + String(updatedKeys[index].counter) + "}";
+                        
+                        LOG_INFO("WebServer", "🔐 OBFUSCATED HOTP GENERATE: Securing response");
+                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
+                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                        return;
+                    }
+                    
                     // /api/pincode_settings GET
                     if (targetEndpoint == "/api/pincode_settings" && targetMethod == "GET") {
                         if (request->hasHeader("X-User-Activity")) resetActivityTimer();
                         pinManager.loadPinConfig();
+                        
+                        // Проверяем текущее состояние device key
+                        bool pinProtectionEnabled = CryptoManager::getInstance().isDeviceKeyEncrypted();
+                        bool deviceKeyExists = CryptoManager::getInstance().isDeviceKeyFileExists();
+                        
+                        // Проверяем статус Device BLE PIN
+                        bool deviceBlePinEnabled = CryptoManager::getInstance().isDeviceBlePinEnabled();
+                        bool deviceBlePinConfigured = CryptoManager::getInstance().isDeviceBlePinConfigured();
+                        
                         JsonDocument doc;
-                        doc["enabled"] = pinManager.isPinEnabled();
-                        doc["enabledForDevice"] = pinManager.isPinEnabledForDevice();
-                        doc["enabledForBle"] = pinManager.isPinEnabledForBle();
+                        doc["pinProtectionEnabled"] = pinProtectionEnabled;
+                        doc["deviceKeyExists"] = deviceKeyExists;
                         doc["length"] = pinManager.getPinLength();
+                        
+                        // Device BLE PIN status
+                        doc["deviceBlePinEnabled"] = deviceBlePinEnabled;
+                        doc["deviceBlePinConfigured"] = deviceBlePinConfigured;
+                        
+                        // Legacy fields для обратной совместимости
+                        doc["enabled"] = pinProtectionEnabled;
+                        doc["enabledForDevice"] = pinProtectionEnabled;
+                        
                         String response;
                         serializeJson(doc, response);
                         WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", response, secureLayer);
@@ -5656,7 +6834,7 @@ void WebServerManager::start() {
                         output += String(timeout);
                         output += "}";
                         
-                        LOG_INFO("WebServer", "🔗 Obfuscated config: timeout=" + String(timeout));
+                        LOG_DEBUG("WebServer", "🔗 Obfuscated config: timeout=" + String(timeout));
                         WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
                         if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
                         return;
@@ -5896,6 +7074,53 @@ void WebServerManager::start() {
                         }
                     }
                     
+                    // /api/clock_settings GET
+                    if (targetEndpoint == "/api/clock_settings" && targetMethod == "GET") {
+                        JsonDocument doc;
+                        doc["timezone"] = configManager.getTimezone();
+                        String response;
+                        serializeJson(doc, response);
+                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", response, secureLayer);
+                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                        return;
+                    }
+                    
+                    // /api/clock_settings POST
+                    if (targetEndpoint == "/api/clock_settings" && targetMethod == "POST") {
+                        if (request->hasHeader("X-User-Activity")) resetActivityTimer();
+                        
+                        String tz = targetData["timezone"].as<String>();
+                        JsonDocument doc;
+                        String response;
+                        int statusCode = 200;
+                        
+                        if (tz.length() == 0) {
+                            doc["success"] = false;
+                            doc["message"] = "Missing timezone parameter!";
+                            statusCode = 400;
+                        } else if (tz.length() > 64) {
+                            doc["success"] = false;
+                            doc["message"] = "Invalid timezone value!";
+                            statusCode = 400;
+                        } else if (configManager.saveTimezone(tz)) {
+                            setenv("TZ", tz.c_str(), 1);
+                            tzset();
+                            LOG_INFO("WebServer", "🔗 Obfuscated timezone changed to: " + tz);
+                            doc["success"] = true;
+                            doc["message"] = "Timezone saved successfully!";
+                            doc["timezone"] = tz;
+                        } else {
+                            doc["success"] = false;
+                            doc["message"] = "Failed to save timezone!";
+                            statusCode = 500;
+                        }
+                        
+                        serializeJson(doc, response);
+                        WebServerSecureIntegration::sendSecureResponse(request, statusCode, "application/json", response, secureLayer);
+                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                        return;
+                    }
+                    
                     // /api/display_settings POST
                     if (targetEndpoint == "/api/display_settings" && targetMethod == "POST") {
                         if (request->hasHeader("X-User-Activity")) {
@@ -5961,67 +7186,164 @@ void WebServerManager::start() {
                             resetActivityTimer();
                         }
                         
-                        bool enabledForDevice = targetData["enabledForDevice"].as<bool>();
+                        bool enablePinProtection = targetData["enabledForDevice"].as<bool>();
                         bool enabledForBle = targetData["enabledForBle"].as<bool>();
                         int pinLength = targetData["length"].as<int>();
                         String newPin = targetData["pin"].as<String>();
                         String confirmPin = targetData["pin_confirm"].as<String>();
+                        String currentPin = targetData["current_pin"].as<String>();
                         
-                        LOG_INFO("WebServer", "🔗 Obfuscated PIN settings: device=" + String(enabledForDevice) + ", ble=" + String(enabledForBle) + ", len=" + String(pinLength));
-                        
-                        // Применяем настройки
-                        pinManager.setPinEnabledForDevice(enabledForDevice);
-                        pinManager.setPinEnabledForBle(enabledForBle);
-                        
-                        if (pinLength >= 4 && pinLength <= MAX_PIN_LENGTH) {
-                            pinManager.setPinLength(pinLength);
-                        }
+                        LOG_INFO("WebServer", "🔗 Obfuscated PIN settings: device=" + String(enablePinProtection) + ", ble=" + String(enabledForBle) + ", len=" + String(pinLength));
                         
                         String message;
                         int statusCode;
                         bool success;
+                        bool requiresReboot = false;
                         
-                        if (enabledForDevice || enabledForBle) {
-                            if (newPin.length() > 0) {
-                                if (newPin != confirmPin) {
-                                    message = "PINs do not match.";
-                                    statusCode = 400;
-                                    success = false;
-                                } else {
-                                    pinManager.setPin(newPin);
-                                    pinManager.saveConfig();
-                                    message = "PIN settings updated successfully!";
-                                    statusCode = 200;
-                                    success = true;
-                                    LOG_INFO("WebServer", "🔗 Obfuscated PIN settings updated successfully");
-                                }
-                            } else {
-                                pinManager.saveConfig();
-                                message = "PIN settings updated successfully!";
-                                statusCode = 200;
-                                success = true;
-                            }
-                        } else {
-                            if (!pinManager.isPinSet()) {
-                                pinManager.setPinEnabledForDevice(false);
-                                pinManager.setPinEnabledForBle(false);
-                                pinManager.saveConfig();
-                                message = "Cannot enable PIN protection without setting a PIN first.";
+                        // Проверяем текущее состояние device key
+                        bool currentlyEncrypted = CryptoManager::getInstance().isDeviceKeyEncrypted();
+                        
+                        if (enablePinProtection) {
+                            // ВКЛЮЧЕНИЕ PIN ЗАЩИТЫ
+                            
+                            if (newPin.length() == 0) {
+                                message = "PIN is required to enable protection.";
+                                statusCode = 400;
+                                success = false;
+                            } else if (newPin != confirmPin) {
+                                message = "PINs do not match.";
+                                statusCode = 400;
+                                success = false;
+                            } else if (newPin.length() < 4 || newPin.length() > 10) {
+                                message = "PIN must be 4-10 digits.";
                                 statusCode = 400;
                                 success = false;
                             } else {
-                                pinManager.saveConfig();
-                                message = "PIN settings updated successfully!";
+                                if (currentlyEncrypted) {
+                                    // Device key уже зашифрован - меняем PIN
+                                    LOG_INFO("WebServer", "🔗 Obfuscated: Changing PIN encryption...");
+                                    
+                                    if (currentPin.length() == 0) {
+                                        message = "Current PIN is required to change PIN.";
+                                        statusCode = 400;
+                                        success = false;
+                                    } else if (CryptoManager::getInstance().changePinEncryption(currentPin, newPin)) {
+                                        message = "PIN changed successfully! Device will reboot.";
+                                        statusCode = 200;
+                                        success = true;
+                                        requiresReboot = true;
+                                        LOG_INFO("WebServer", "🔗 Obfuscated: PIN changed successfully");
+                                    } else {
+                                        message = "Failed to change PIN. Current PIN may be incorrect.";
+                                        statusCode = 400;
+                                        success = false;
+                                        LOG_ERROR("WebServer", "🔗 Obfuscated: Failed to change PIN");
+                                    }
+                                } else {
+                                    // Device key не зашифрован - включаем защиту через factory reset
+                                    LOG_WARNING("WebServer", "🔗 Obfuscated: Enabling PIN protection requires factory reset!");
+                                    
+                                    // Проверяем что пользователь подтвердил factory reset
+                                    bool factoryResetConfirmed = targetData["factory_reset_confirmed"].as<bool>();
+                                    
+                                    if (!factoryResetConfirmed) {
+                                        message = "WARNING: Enabling PIN protection will perform FACTORY RESET and delete ALL data (TOTP keys, passwords, WiFi). Export your data first! Send 'factory_reset_confirmed=true' to proceed.";
+                                        statusCode = 400;
+                                        success = false;
+                                        LOG_WARNING("WebServer", "🔗 Obfuscated: Factory reset not confirmed - aborting PIN enable");
+                                    } else {
+                                        // Удаляем все данные (полная очистка как Hardware Reset)
+                                        LOG_INFO("WebServer", "🔗 Obfuscated: Starting full factory reset...");
+                                        
+                                        LittleFS.remove(KEYS_FILE);
+                                        LittleFS.remove(PASSWORD_FILE);
+                                        LittleFS.remove("/wifi_config.json");
+                                        LittleFS.remove("/wifi_config.json.enc");
+                                        LittleFS.remove("/splash_config.json");
+                                        LittleFS.remove(PIN_FILE);
+                                        LittleFS.remove(CONFIG_FILE);
+                                        LittleFS.remove(DEVICE_KEY_FILE);
+                                        LittleFS.remove(BLE_CONFIG_FILE);
+                                        LittleFS.remove(WEB_ADMIN_FILE);
+                                        LittleFS.remove(MDNS_CONFIG_FILE);
+                                        LittleFS.remove(LOGIN_STATE_FILE);
+                                        LittleFS.remove("/ble_pin.json.enc");
+                                        LittleFS.remove("/session.json.enc");
+                                        
+                                        // URL Obfuscation: Удаление boot counter и всех mappings
+                                        LOG_INFO("WebServer", "🔗 Obfuscated: Clearing URL obfuscation data...");
+                                        LittleFS.remove("/boot_counter.txt");
+                                        
+                                        // Удаляем все url_mappings_*.json файлы
+                                        fs::File root = LittleFS.open("/", "r");
+                                        if (root) {
+                                            fs::File file = root.openNextFile();
+                                            while (file) {
+                                                String filename = String(file.name());
+                                                if (filename.startsWith("/url_mappings_") && filename.endsWith(".json")) {
+                                                    LOG_DEBUG("WebServer", "🔗 Obfuscated: Removing URL mapping file: " + filename);
+                                                    LittleFS.remove(filename);
+                                                }
+                                                file = root.openNextFile();
+                                            }
+                                        }
+                                        
+                                        // Очистка NVS partition (BLE bonding keys)
+                                        LOG_INFO("WebServer", "🔗 Obfuscated: Clearing NVS partition...");
+                                        nvs_flash_erase_partition("nvs");
+                                        
+                                        LOG_INFO("WebServer", "🔗 Obfuscated: All data files deleted for factory reset");
+                                        
+                                        // Длина PIN выбирается на устройстве при первой загрузке
+                                        
+                                        message = "Factory reset completed! Device will reboot. On next boot, choose PIN length and create PIN on device screen.";
+                                        statusCode = 200;
+                                        success = true;
+                                        requiresReboot = true;
+                                        LOG_INFO("WebServer", "🔗 Obfuscated: Factory reset completed - device will prompt for PIN length and PIN on next boot");
+                                    }
+                                }
+                            }
+                        } else {
+                            // ОТКЛЮЧЕНИЕ PIN ЗАЩИТЫ
+                            
+                            if (!currentlyEncrypted) {
+                                message = "PIN protection is already disabled.";
+                                statusCode = 200;
+                                success = false;
+                                LOG_INFO("WebServer", "🔗 Obfuscated: PIN protection already disabled");
+                            } else {
+                                // Новая логика: устанавливаем глобальный флаг для запроса PIN на устройстве
+                                LOG_INFO("WebServer", "🔗 Obfuscated: PIN disable requested - will prompt on device");
+                                
+                                extern bool shouldPromptPinDisable;
+                                shouldPromptPinDisable = true;
+                                
+                                message = "Please enter PIN on device to confirm. Check device screen.";
                                 statusCode = 200;
                                 success = true;
+                                requiresReboot = false; // Не перезагружаем сразу
+                                LOG_INFO("WebServer", "🔗 Obfuscated: PIN disable flag set - device will prompt for PIN");
                             }
                         }
                         
+                        // BLE PIN настройки (независимо от device PIN)
+                        pinManager.setPinEnabledForBle(enabledForBle);
+                        pinManager.saveConfig();
+                        
+                        // Формируем JSON ответ
                         JsonDocument doc;
                         doc["success"] = success;
                         doc["message"] = message;
+                        doc["requiresReboot"] = requiresReboot;
                         String response;
                         serializeJson(doc, response);
+                        
+                        // Если требуется перезагрузка, планируем её
+                        if (requiresReboot && success) {
+                            extern bool shouldRestart;
+                            shouldRestart = true;
+                        }
                         
                         LOG_INFO("WebServer", "🔐 OBFUSCATED PINCODE_SETTINGS: Securing response");
                         WebServerSecureIntegration::sendSecureResponse(request, statusCode, "application/json", response, secureLayer);
@@ -6031,55 +7353,132 @@ void WebServerManager::start() {
                     
                     // /api/ble_pin_update POST
                     if (targetEndpoint == "/api/ble_pin_update" && targetMethod == "POST") {
-                        String blePinStr = targetData["ble_pin"].as<String>();
+                        // DEBUG: Логируем весь targetData
+                        String targetDataDebug;
+                        serializeJson(targetData, targetDataDebug);
+                        LOG_DEBUG("WebServer", "🔗 [OBFUSCATED] targetData JSON: " + targetDataDebug);
                         
-                        LOG_INFO("WebServer", "🔗 Obfuscated BLE PIN update: pin=[HIDDEN]");
+                        // Новая логика: поддержка двух типов PIN
+                        String bleBondingPinStr = targetData["ble_bonding_pin"].as<String>();
+                        String deviceBlePinStr = targetData["device_ble_pin"].as<String>();
+                        String deviceBlePinEnabledStr = targetData["device_ble_pin_enabled"].as<String>();
+                        bool deviceBlePinEnabled = (deviceBlePinEnabledStr == "true");
+                        bool deviceBlePinEnabledProvided = (deviceBlePinEnabledStr.length() > 0 && deviceBlePinEnabledStr != "null"); // Параметр был передан
+                        
+                        // Проверка на null/пустые значения
+                        bool hasBondingPin = (bleBondingPinStr.length() > 0 && bleBondingPinStr != "null");
+                        bool hasDevicePin = (deviceBlePinStr.length() > 0 && deviceBlePinStr != "null");
+                        
+                        LOG_INFO("WebServer", "🔗 [OBFUSCATED] BLE PIN UPDATE: hasBondingPin=" + String(hasBondingPin) + ", hasDevicePin=" + String(hasDevicePin));
                         
                         String message;
-                        int statusCode;
-                        bool success;
+                        int statusCode = 200;
+                        bool success = true;
                         
-                        // Validate PIN format (6 digits)
-                        if (blePinStr.length() != 6) {
-                            message = "BLE PIN must be exactly 6 digits";
-                            statusCode = 400;
-                            success = false;
-                        } else {
-                            bool validDigits = true;
-                            for (char c : blePinStr) {
-                                if (!isdigit(c)) {
-                                    validDigits = false;
-                                    break;
-                                }
-                            }
-                            
-                            if (!validDigits) {
-                                message = "BLE PIN must contain only digits";
+                        // Обработка BLE Bonding PIN
+                        if (hasBondingPin) {
+                            if (bleBondingPinStr.length() != 6) {
+                                message = "BLE Bonding PIN must be exactly 6 digits";
                                 statusCode = 400;
                                 success = false;
                             } else {
-                                uint32_t blePin = blePinStr.toInt();
-                                
-                                // Save the new BLE PIN through CryptoManager
-                                if (CryptoManager::getInstance().saveBlePin(blePin)) {
-                                    LOG_INFO("WebServer", "🔗 Obfuscated BLE PIN updated successfully");
-                                    
-                                    // Clear all BLE bonding keys when PIN changes for security
-                                    if (bleKeyboardManager) {
-                                        bleKeyboardManager->clearBondingKeys();
-                                        LOG_INFO("WebServer", "🔗 Obfuscated BLE bonding keys cleared");
+                                bool validDigits = true;
+                                for (char c : bleBondingPinStr) {
+                                    if (!isdigit(c)) {
+                                        validDigits = false;
+                                        break;
                                     }
-                                    
-                                    message = "BLE PIN updated successfully! All BLE clients cleared.";
-                                    statusCode = 200;
-                                    success = true;
-                                } else {
-                                    LOG_ERROR("WebServer", "🔗 Obfuscated Failed to save BLE PIN");
-                                    message = "Failed to save BLE PIN";
-                                    statusCode = 500;
+                                }
+                                
+                                if (!validDigits) {
+                                    message = "BLE Bonding PIN must contain only digits";
+                                    statusCode = 400;
                                     success = false;
+                                } else {
+                                    uint32_t blePin = bleBondingPinStr.toInt();
+                                    
+                                    if (CryptoManager::getInstance().saveBlePin(blePin)) {
+                                        LOG_INFO("WebServer", "🔗 Obfuscated BLE Bonding PIN updated successfully");
+                                        
+                                        // Clear all BLE bonding keys when PIN changes for security
+                                        if (bleKeyboardManager) {
+                                            bleKeyboardManager->clearBondingKeys();
+                                            LOG_INFO("WebServer", "🔗 Obfuscated BLE bonding keys cleared");
+                                        }
+                                        
+                                        message = "BLE Bonding PIN updated successfully! All BLE clients cleared.";
+                                    } else {
+                                        LOG_ERROR("WebServer", "🔗 Obfuscated Failed to save BLE Bonding PIN");
+                                        message = "Failed to save BLE Bonding PIN";
+                                        statusCode = 500;
+                                        success = false;
+                                    }
                                 }
                             }
+                        }
+                        
+                        // Обработка Device BLE PIN
+                        if (success && hasDevicePin) {
+                            if (deviceBlePinStr.length() != 6) {
+                                message = "Device BLE PIN must be exactly 6 digits";
+                                statusCode = 400;
+                                success = false;
+                            } else {
+                                bool validDigits = true;
+                                for (char c : deviceBlePinStr) {
+                                    if (!isdigit(c)) {
+                                        validDigits = false;
+                                        break;
+                                    }
+                                }
+                                
+                                if (!validDigits) {
+                                    message = "Device BLE PIN must contain only digits";
+                                    statusCode = 400;
+                                    success = false;
+                                } else {
+                                    uint32_t devicePin = deviceBlePinStr.toInt();
+                                    
+                                    if (deviceBlePinStr == "000000") {
+                                        devicePin = 0;
+                                    }
+                                    
+                                    LOG_INFO("WebServer", "🔗 Device BLE PIN validated, saving (value protected)");
+                                    
+                                    if (CryptoManager::getInstance().saveDeviceBlePin(devicePin)) {
+                                        LOG_INFO("WebServer", "🔗 Obfuscated Device BLE PIN updated successfully");
+                                        
+                                        if (hasBondingPin) {
+                                            message += " Device BLE PIN also updated.";
+                                        } else {
+                                            message = "Device BLE PIN updated successfully!";
+                                        }
+                                    } else {
+                                        LOG_ERROR("WebServer", "🔗 Obfuscated Failed to save Device BLE PIN");
+                                        message = "Failed to save Device BLE PIN";
+                                        statusCode = 500;
+                                        success = false;
+                                    }
+                                }
+                            }
+                        } else if (success && !hasDevicePin && deviceBlePinEnabledProvided && deviceBlePinEnabled == false) {
+                            // Выключение Device BLE PIN (только enabled=false без PIN, и параметр ЯВНО передан)
+                            if (CryptoManager::getInstance().isDeviceBlePinConfigured()) {
+                                CryptoManager::getInstance().setDeviceBlePinEnabled(false);
+                                LOG_INFO("WebServer", "🔗 Obfuscated Device BLE PIN disabled successfully");
+                                message = "Device BLE PIN disabled successfully!";
+                                hasDevicePin = true; // Помечаем что операция выполнена
+                            } else {
+                                message = "Device BLE PIN not configured";
+                                statusCode = 400;
+                                success = false;
+                            }
+                        }
+                        
+                        if (!hasBondingPin && !hasDevicePin) {
+                            message = "No PIN parameters provided";
+                            statusCode = 400;
+                            success = false;
                         }
                         
                         JsonDocument doc;
@@ -6088,7 +7487,7 @@ void WebServerManager::start() {
                         String response;
                         serializeJson(doc, response);
                         
-                        LOG_INFO("WebServer", "🔐 OBFUSCATED BLE_PIN_UPDATE: Securing response");
+                        LOG_INFO("WebServer", "🔐 OBFUSCATED BLE_PIN_UPDATE: Securing response, success=" + String(success));
                         WebServerSecureIntegration::sendSecureResponse(request, statusCode, "application/json", response, secureLayer);
                         if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
                         return;
@@ -6138,13 +7537,15 @@ void WebServerManager::start() {
                         
                         String output;
                         if (configManager.saveApPassword(newPassword)) {
-                            output = "WiFi AP password changed successfully!";
-                            LOG_INFO("WebServer", "AP password changed successfully");
-                            WebServerSecureIntegration::sendSecureResponse(request, 200, "text/plain", output, secureLayer);
+                            output = "{\"success\":true,\"message\":\"WiFi AP password updated. Device will restart in 3 seconds...\",\"restart\":true}";
+                            LOG_INFO("WebServer", "AP password changed successfully - scheduling restart");
+                            WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
                             if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                            delay(3000);
+                            ESP.restart();
                         } else {
                             if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                            return request->send(500, "text/plain", "Failed to save new AP password.");
+                            return request->send(500, "application/json", "{\"success\":false,\"error\":\"Failed to save new AP password.\"}");
                         }
                         return;
                     }
@@ -6172,7 +7573,7 @@ void WebServerManager::start() {
                             resetActivityTimer();
                         }
                         
-                        LOG_INFO("WebServer", "🔗 Obfuscated passwords list request");
+                        LOG_DEBUG("WebServer", "🔗 Obfuscated passwords list request");
                         auto passwords = passwordManager.getAllPasswords();
                         
                         JsonDocument doc;
@@ -6385,22 +7786,15 @@ void WebServerManager::start() {
                         plaintext = String(); // Полная очистка
                         
                         LOG_DEBUG("WebServer", "🔐 Encrypted size: " + String(encryptedContent.length()) + " bytes");
-                        LOG_INFO("WebServer", "💾 OBFUSCATED PASSWORDS EXPORT: Wrapping encrypted file in JSON");
+                        LOG_INFO("WebServer", "💾 OBFUSCATED PASSWORDS EXPORT: Sending encrypted file directly");
                         
-                        // 🛡️ Шаг 3: Формирование response (ручное создание JSON для экономии памяти)
-                        String jsonResponse;
-                        jsonResponse.reserve(encryptedContent.length() + 200);
-                        jsonResponse = "{\"status\":\"success\",\"message\":\"Export successful\",\"filename\":\"encrypted_passwords_backup.json\",\"fileContent\":\"";
-                        jsonResponse += encryptedContent;
-                        jsonResponse += "\"}";
+                        // Файл уже зашифрован CryptoManager, отправляем напрямую
+                        // encryptedContent уже JSON формата {"salt":"...","iv":"...","ciphertext":"..."}
                         
-                        encryptedContent.clear(); // Освобождаем память перед отправкой
-                        encryptedContent = String();
-                        
-                        LOG_DEBUG("WebServer", "📦 Response JSON size: " + String(jsonResponse.length()) + " bytes");
+                        LOG_DEBUG("WebServer", "📦 Encrypted content size: " + String(encryptedContent.length()) + " bytes");
                         LOG_DEBUG("WebServer", "💾 Free heap before send: " + String(ESP.getFreeHeap()) + " bytes");
                         
-                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", jsonResponse, secureLayer);
+                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", encryptedContent, secureLayer);
                         if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
                         return;
                     }
@@ -6496,6 +7890,15 @@ void WebServerManager::start() {
                                 JsonObject obj = array.add<JsonObject>();
                                 obj["name"] = key.name;
                                 obj["secret"] = key.secret;
+                                // Добавляем расширенные метаданные
+                                obj["type"] = (key.type == TOTPType::HOTP) ? "H" : "T";
+                                obj["algorithm"] = (key.algorithm == TOTPAlgorithm::SHA256) ? "256" :
+                                                   (key.algorithm == TOTPAlgorithm::SHA512) ? "512" : "1";
+                                obj["digits"] = key.digits;
+                                obj["period"] = key.period;
+                                if (key.counter != 0) {
+                                    obj["counter"] = key.counter;
+                                }
                             }
                             serializeJson(doc, plaintext);
                             // JsonDocument автоматически освобождается здесь
@@ -6509,22 +7912,15 @@ void WebServerManager::start() {
                         plaintext = String();
                         
                         LOG_DEBUG("WebServer", "🔐 Encrypted size: " + String(encryptedContent.length()) + " bytes");
-                        LOG_INFO("WebServer", "💾 OBFUSCATED TOTP EXPORT: Wrapping encrypted file in JSON");
+                        LOG_INFO("WebServer", "💾 OBFUSCATED TOTP EXPORT: Sending encrypted file directly");
                         
-                        // 🛡️ Шаг 3: Ручное формирование JSON
-                        String jsonResponse;
-                        jsonResponse.reserve(encryptedContent.length() + 200);
-                        jsonResponse = "{\"status\":\"success\",\"message\":\"Export successful\",\"filename\":\"encrypted_keys_backup.json\",\"fileContent\":\"";
-                        jsonResponse += encryptedContent;
-                        jsonResponse += "\"}";
+                        // Файл уже зашифрован CryptoManager, отправляем напрямую
+                        // encryptedContent уже JSON формата {"salt":"...","iv":"...","ciphertext":"..."}
                         
-                        encryptedContent.clear();
-                        encryptedContent = String();
-                        
-                        LOG_DEBUG("WebServer", "📦 Response JSON size: " + String(jsonResponse.length()) + " bytes");
+                        LOG_DEBUG("WebServer", "📦 Encrypted content size: " + String(encryptedContent.length()) + " bytes");
                         LOG_DEBUG("WebServer", "💾 Free heap before send: " + String(ESP.getFreeHeap()) + " bytes");
                         
-                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", jsonResponse, secureLayer);
+                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", encryptedContent, secureLayer);
                         if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
                         return;
                     }
@@ -6606,6 +8002,41 @@ void WebServerManager::start() {
                         
                         delay(1000);
                         ESP.restart();
+                        return;
+                    }
+                    
+                    // /api/clear_ble_clients POST
+                    if (targetEndpoint == "/api/clear_ble_clients" && targetMethod == "POST") {
+                        LOG_INFO("WebServer", "🔗 Obfuscated clear_ble_clients request");
+                        
+                        String responseMsg;
+                        bool success = false;
+                        
+                        if (bleKeyboardManager) {
+                            bleKeyboardManager->clearBondingKeys();
+                            LOG_INFO("WebServer", "BLE bonding keys cleared via obfuscated tunnel");
+                            responseMsg = "{\"success\":true,\"message\":\"BLE clients cleared\"}";
+                            success = true;
+                        } else {
+                            LOG_ERROR("WebServer", "BLE Keyboard Manager not available");
+                            responseMsg = "{\"success\":false,\"message\":\"BLE Manager not available\"}";
+                        }
+                        
+                        WebServerSecureIntegration::sendSecureResponse(request, success ? 200 : 500, "application/json", responseMsg, secureLayer);
+                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                        return;
+                    }
+                    
+                    // /api/activity POST
+                    if (targetEndpoint == "/api/activity" && targetMethod == "POST") {
+                        if (!isAuthenticated(request)) {
+                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                            return request->send(401);
+                        }
+                        resetActivityTimer();
+                        String output = "{\"status\":\"success\"}";
+                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
+                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
                         return;
                     }
                     
@@ -6784,6 +8215,12 @@ void WebServerManager::start() {
 }
 
 void WebServerManager::startConfigServer() {
+    // Captive portal detection routes
+    server.on("/generate_204", HTTP_GET, [](AsyncWebServerRequest *r){ r->redirect("http://192.168.4.1"); });
+    server.on("/hotspot-detect.html", HTTP_GET, [](AsyncWebServerRequest *r){ r->redirect("http://192.168.4.1"); });
+    server.on("/ncsi.txt", HTTP_GET, [](AsyncWebServerRequest *r){ r->redirect("http://192.168.4.1"); });
+    server.on("/fwlink", HTTP_GET, [](AsyncWebServerRequest *r){ r->redirect("http://192.168.4.1"); });
+    
     server.on("/", HTTP_GET, [this](AsyncWebServerRequest *request){
         String html = wifi_setup_html;
         // Вставляем mDNS имя хоста по умолчанию в HTML для редиректа
@@ -6791,7 +8228,16 @@ void WebServerManager::startConfigServer() {
         request->send(200, "text/html", html);
     });
     server.on("/scan", HTTP_GET, [](AsyncWebServerRequest *request){
-        int n = WiFi.scanNetworks();
+        int n = WiFi.scanComplete();
+        if (n == WIFI_SCAN_RUNNING) {
+            request->send(202, "application/json", "[]");
+            return;
+        }
+        if (n == WIFI_SCAN_FAILED || n == 0) {
+            WiFi.scanNetworks(true);
+            request->send(200, "application/json", "[]");
+            return;
+        }
         JsonDocument doc;
         JsonArray array = doc.to<JsonArray>();
         for (int i = 0; i < n; ++i) {
@@ -6799,6 +8245,8 @@ void WebServerManager::startConfigServer() {
             net["ssid"] = WiFi.SSID(i);
             net["rssi"] = WiFi.RSSI(i);
         }
+        WiFi.scanDelete();
+        WiFi.scanNetworks(true);
         String output;
         serializeJson(doc, output);
         request->send(200, "application/json", output);
@@ -6831,6 +8279,7 @@ void WebServerManager::startConfigServer() {
             request->send(400, "text/plain", "Missing SSID or password.");
         }
     });
+    server.onNotFound([](AsyncWebServerRequest *r){ r->redirect("http://192.168.4.1"); });
     server.begin();
 }
 

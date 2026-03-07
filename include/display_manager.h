@@ -25,7 +25,8 @@ public:
     void drawLayout(const String& serviceName, int batteryPercentage, bool isCharging, bool isWebServerOn); 
     void drawPasswordLayout(const String& name, const String& password, int batteryPercentage, bool isCharging, bool isWebServerOn);
     void updateBatteryStatus(int percentage, bool isCharging);
-    void updateTOTPCode(const String& code, int timeRemaining);
+    void updateClockStatus();
+    void updateTOTPCode(const String& code, int timeRemaining, int period = 30);
     void turnOff();
     void turnOn();
     void setBrightness(uint8_t brightness); // Set backlight brightness (0-255) for fade effects
@@ -35,12 +36,22 @@ public:
     void drawNoItemsPage(const String& text);
     void drawBleInitLoader(int progress);
     void drawGenericLoader(int progress, const String& text); // Новый универсальный лоадер
+    void drawHOTPLoader(int progress); // HOTP loader progress 0-100
     void hideLoader(); // Скрыть лоадер и сбросить состояние
+    void resetLoaderState(); // Reset loader flags without clearing screen
+    void eraseLoaderArea(); // Erase loader bar area and reset flags
     bool isLoaderActive() const { return _loaderActive; } // Проверить активность лоадера
     void drawBleAdvertisingPage(const String& deviceName, const String& status, int timeLeft);
     void drawBleConfirmPage(const String& passwordName, const String& password, const String& deviceName);
     void drawBleSendingPage();
     void drawBleResultPage(bool success);
+    
+    // QR Code display
+    void showQRCode(const String& text, int timeoutSeconds = 30);
+    void hideQRCode();
+    bool isQRCodeActive() const { return _qrCodeActive; }
+    void requestShowQRCode(const String& text, int timeoutSeconds = 30); // Thread-safe request
+    void updateQRTimer(int secondsRemaining); // Update timer without full redraw
 
     void setKeySwitched(bool switched) { _isKeySwitched = switched; } // <-- ADDED
     bool isCharging() const { return _isCharging; }
@@ -61,6 +72,7 @@ private:
     enum class TotpState { IDLE, SCRAMBLING, REVEALING };
 
     void drawBatteryOnSprite(int percentage, bool isCharging, int chargingValue = 0);
+    void drawClockOnSprite();
     void drawTotpContainer();
     void drawTotpText(const String& textToDraw);
 
@@ -103,6 +115,17 @@ private:
 
     // Состояние для страницы "No Items"
     bool _isNoItemsPageActive = false;
+    
+    // QR Code состояние
+    bool _qrCodeActive = false;
+    unsigned long _qrCodeTimeout = 0;
+    int _qrCodeTimerY = 0; // Y позиция таймера
+    int _lastQRTimerSeconds = -1; // Последнее значение таймера
+    
+    // QR Code request (thread-safe)
+    bool _qrCodeRequested = false;
+    String _qrCodeText = "";
+    int _qrCodeTimeoutSeconds = 30;
 };
 
 #endif // DISPLAY_MANAGER_H

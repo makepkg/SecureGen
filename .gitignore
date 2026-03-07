@@ -8,8 +8,6 @@
 .env
 
 # ⚠️ SECURITY: Internal documentation - DO NOT PUBLISH
-SECURITY_INTERNAL.md
-docs/security/SECURITY_AUDIT_INTERNAL.md
 
 # Private assets
 assets/archive(private)/
@@ -25,6 +23,7 @@ assets/archive(private)/
 Thumbs.db
 
 # Build artifacts
+compile_commands.json
 *.bin
 *.elf
 *.map
@@ -32,3 +31,12 @@ Thumbs.db
 # IDE specific
 .idea/
 *.iml
+.cache
+
+# Website build artifacts
+website/node_modules/
+website/dist/
+website/.astro/
+
+# Firmware binaries (never commit, always from Releases)
+website/public/firmware/*.bin

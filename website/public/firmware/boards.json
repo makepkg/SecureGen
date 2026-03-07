@@ -1,0 +1,16 @@
+{
+  "boards": [
+    {
+      "id": "lilygo-t-display",
+      "name": "LILYGO TTGO T-Display",
+      "chip": "ESP32",
+      "description": "ESP32 with 1.14\" TFT display",
+      "asset_prefix": "",
+      "offsets": {
+        "bootloader": 4096,
+        "partitions": 32768,
+        "firmware": 65536
+      }
+    }
+  ]
+}

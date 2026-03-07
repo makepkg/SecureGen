@@ -20,6 +20,10 @@ struct LogEntry {
     String message;
 };
 
+#ifndef LOG_LEVEL
+#define LOG_LEVEL 3  // 0=DEBUG 1=INFO 2=WARNING 3=ERROR 4=CRITICAL
+#endif
+
 class LogManager {
 public:
     static LogManager& getInstance();
@@ -32,6 +36,8 @@ public:
     void logError(const String& component, const String& message);
     void logCritical(const String& component, const String& message);
     
+    void setMinLogLevel(LogLevel level);
+    LogLevel getMinLogLevel() const;
 
 private:
     LogManager();
@@ -39,6 +45,7 @@ private:
     void operator=(const LogManager&) = delete;
     
     String levelToString(LogLevel level);
+    LogLevel minLevel = static_cast<LogLevel>(LOG_LEVEL);
 };
 
 // Convenience macros for easy logging

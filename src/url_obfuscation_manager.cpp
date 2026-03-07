@@ -32,21 +32,45 @@ bool URLObfuscationManager::begin() {
     
     // Регистрируем критические эндпоинты для тестовой страницы
     registerCriticalEndpoint("/api/secure/keyexchange", "ECDH Key Exchange");
+    registerCriticalEndpoint("/login", "Login Page");
+    registerCriticalEndpoint("/api/tunnel", "Method Tunneling");
     registerCriticalEndpoint("/api/keys", "TOTP Keys & Codes");
     registerCriticalEndpoint("/api/add", "TOTP Key Addition");
+    registerCriticalEndpoint("/api/remove", "TOTP Key Removal");
+    registerCriticalEndpoint("/api/show_qr", "QR Code Display");
+    registerCriticalEndpoint("/api/hotp/generate", "HOTP Code Generation");
     registerCriticalEndpoint("/api/keys/reorder", "TOTP Keys Reordering");
+    registerCriticalEndpoint("/api/export", "TOTP Keys Export");
+    registerCriticalEndpoint("/api/import", "TOTP Keys Import");
     registerCriticalEndpoint("/api/passwords", "All Passwords List");
-    registerCriticalEndpoint("/api/passwords/get", "Password Retrieval");
     registerCriticalEndpoint("/api/passwords/add", "Password Addition");
     registerCriticalEndpoint("/api/passwords/delete", "Password Deletion");
     registerCriticalEndpoint("/api/passwords/update", "Password Update");
+    registerCriticalEndpoint("/api/passwords/get", "Password Retrieval");
     registerCriticalEndpoint("/api/passwords/reorder", "Password Reordering");
     registerCriticalEndpoint("/api/passwords/export", "Password Export");
     registerCriticalEndpoint("/api/passwords/import", "Password Import");
+    registerCriticalEndpoint("/api/config", "Server Configuration");
     registerCriticalEndpoint("/api/pincode_settings", "PIN Security Settings");
-    registerCriticalEndpoint("/api/splash/mode", "Splash Screen Selection"); // API выбора изображений
     registerCriticalEndpoint("/api/change_password", "Web Cabinet Password Change");
     registerCriticalEndpoint("/api/change_ap_password", "WiFi AP Password Change");
+    registerCriticalEndpoint("/api/session_duration", "Session Duration Settings");
+    registerCriticalEndpoint("/api/activity", "Activity Timer Reset");
+    registerCriticalEndpoint("/api/enable_import_export", "API Access Control");
+    registerCriticalEndpoint("/api/import_export_status", "API Access Status");
+    registerCriticalEndpoint("/api/theme", "Display Theme");
+    registerCriticalEndpoint("/api/display_settings", "Display Settings");
+    registerCriticalEndpoint("/api/splash/mode", "Splash Screen Selection");
+    registerCriticalEndpoint("/api/clock_settings", "Clock Display Settings");
+    registerCriticalEndpoint("/api/ble_pin_update", "BLE PIN Update");
+    registerCriticalEndpoint("/api/clear_ble_clients", "Clear BLE Clients");
+    registerCriticalEndpoint("/api/ble_settings", "BLE Device Settings");
+    registerCriticalEndpoint("/api/mdns_settings", "mDNS Settings");
+    registerCriticalEndpoint("/api/startup_mode", "Startup Mode");
+    registerCriticalEndpoint("/api/settings", "Device Settings");
+    registerCriticalEndpoint("/api/reboot", "System Reboot");
+    registerCriticalEndpoint("/api/reboot_with_web", "Reboot With Web Server");
+    registerCriticalEndpoint("/logout", "Admin Logout");
     // /api/upload_splash removed - custom splash upload disabled for security
     
     // Генерируем initial mapping

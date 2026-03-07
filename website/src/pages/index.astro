@@ -1,0 +1,316 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="SecureGen — Open Source TOTP Authenticator & Password Manager" page="home">
+  <section class="hero">
+    <p class="tagline">ESP32 · OPEN SOURCE · MIT LICENSE</p>
+    <h1>Your secrets stay on the device</h1>
+    <p class="subtitle">
+      TOTP authenticator and password manager for ESP32. No cloud. No subscriptions. 
+      AES-256 encrypted. Fully open source.
+    </p>
+    <div class="button-row">
+      <a href="/SecureGen/flash" class="btn-primary">⚡ Flash your device</a>
+      <a href="https://github.com/makepkg/SecureGen" target="_blank" rel="noopener noreferrer" class="btn-secondary">GitHub →</a>
+    </div>
+    <div class="badge-row">
+      <span class="badge">MIT License</span>
+      <span class="badge">ESP32</span>
+      <span class="badge">PlatformIO</span>
+      <span class="badge">No Cloud</span>
+      <span class="badge">AES-256</span>
+    </div>
+  </section>
+
+  <section class="features">
+    <p class="section-label">FEATURES</p>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="icon">🔐</div>
+        <h3>TOTP & HOTP</h3>
+        <p>RFC 6238 and RFC 4226. Compatible with Google Authenticator, Authy, and all standard apps.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🔑</div>
+        <h3>Password Manager</h3>
+        <p>Encrypted offline vault. BLE HID keyboard types passwords directly — no clipboard, no app needed.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🌐</div>
+        <h3>Web Interface</h3>
+        <p>Runs on the device. Full management from any browser, no cloud, no account.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🛡️</div>
+        <h3>AES-256 Encrypted</h3>
+        <p>Per-device key derived from your PIN via PBKDF2-HMAC-SHA256. Nothing stored in plaintext.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">⚡</div>
+        <h3>8-Layer Web Security</h3>
+        <p>ECDH key exchange, AES-GCM session encryption, URL obfuscation, traffic masking.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">📡</div>
+        <h3>Works Offline</h3>
+        <p>TOTP codes require internet (NTP sync). Passwords and HOTP codes work in AP and offline modes — no internet needed.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="quick-start">
+    <p class="section-label">QUICK START</p>
+    <div class="terminal">
+      <div class="terminal-bar">
+        <span class="dot dot-red"></span>
+        <span class="dot dot-yellow"></span>
+        <span class="dot dot-green"></span>
+      </div>
+      <pre class="terminal-code"><code>$ git clone https://github.com/makepkg/SecureGen.git
+$ cd SecureGen
+
+<span class="comment"># Open in VS Code with PlatformIO extension</span>
+<span class="comment"># Build & Upload to your ESP32</span></code></pre>
+    </div>
+  </section>
+
+  <section class="links">
+    <p class="section-label">FIND US</p>
+    <div class="links-grid">
+      <a href="https://www.youtube.com/watch?v=YTVQBwgok_E" target="_blank" rel="noopener noreferrer" class="link-card">
+        ▶ YouTube
+      </a>
+      <a href="https://www.hackster.io/makepkg/securegen-open-source-totp-authenticator-password-manager-c350d6" target="_blank" rel="noopener noreferrer" class="link-card">
+        🔧 Hackster.io
+      </a>
+      <a href="https://dev.to/makepkg" target="_blank" rel="noopener noreferrer" class="link-card">
+        📝 Dev.to
+      </a>
+      <a href="https://www.producthunt.com/products/securegen-2" target="_blank" rel="noopener noreferrer" class="link-card">
+        🚀 Product Hunt
+      </a>
+    </div>
+  </section>
+</Layout>
+
+<style>
+  .hero {
+    text-align: center;
+    padding-top: 5rem;
+  }
+
+  .tagline {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    margin-bottom: 1.5rem;
+  }
+
+  .hero h1 {
+    font-size: clamp(2rem, 5vw, 3.5rem);
+    color: var(--text-bright);
+    margin-bottom: 1rem;
+    line-height: 1.2;
+  }
+
+  .subtitle {
+    color: var(--text);
+    max-width: 560px;
+    margin: 0 auto 2rem;
+    font-size: 1.1rem;
+  }
+
+  .button-row {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 2rem;
+  }
+
+  .btn-primary {
+    background-color: #00e5ff;
+    color: #0a0a0f;
+    font-weight: 700;
+    padding: 0.75rem 1.75rem;
+    border-radius: 6px;
+    text-decoration: none;
+    transition: opacity 0.2s;
+  }
+
+  .btn-primary:hover {
+    opacity: 0.9;
+  }
+
+  .btn-secondary {
+    background-color: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-weight: 700;
+    padding: 0.75rem 1.75rem;
+    border-radius: 6px;
+    text-decoration: none;
+    transition: border-color 0.2s, color 0.2s;
+  }
+
+  .btn-secondary:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .badge-row {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 1.5rem;
+  }
+
+  .badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    background-color: rgba(0, 229, 255, 0.08);
+    border: 1px solid rgba(0, 229, 255, 0.2);
+    padding: 0.2rem 0.6rem;
+    border-radius: 3px;
+    color: var(--accent);
+  }
+
+  .features {
+    margin-top: 5rem;
+  }
+
+  .section-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    margin-bottom: 1.5rem;
+  }
+
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+  }
+
+  .feature-card {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+  }
+
+  .feature-card .icon {
+    font-size: 1.5rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .feature-card h3 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.85rem;
+    color: var(--text-bright);
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+  }
+
+  .feature-card p {
+    font-size: 0.85rem;
+    color: var(--text);
+    line-height: 1.6;
+  }
+
+  .quick-start {
+    margin-top: 5rem;
+  }
+
+  .terminal {
+    background-color: #0d0d14;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    overflow-x: auto;
+  }
+
+  .terminal-bar {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .dot-red {
+    background-color: #ff5f56;
+  }
+
+  .dot-yellow {
+    background-color: #ffbd2e;
+  }
+
+  .dot-green {
+    background-color: #27c93f;
+  }
+
+  .terminal-code {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.85rem;
+    color: #e2e8f0;
+    line-height: 1.8;
+    margin: 0;
+  }
+
+  .terminal-code .comment {
+    color: var(--text-dim);
+  }
+
+  .links {
+    margin-top: 4rem;
+    margin-bottom: 5rem;
+  }
+
+  .links-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+  }
+
+  .link-card {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    text-align: center;
+    padding: 1.25rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    text-decoration: none;
+    transition: color 0.2s, border-color 0.2s;
+  }
+
+  .link-card:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  @media (max-width: 768px) {
+    .feature-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .links-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+
+    .hero {
+      padding-top: 3rem;
+    }
+  }
+</style>
