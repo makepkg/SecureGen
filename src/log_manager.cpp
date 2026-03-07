@@ -12,6 +12,7 @@ void LogManager::begin() {
 }
 
 void LogManager::log(LogLevel level, const String& component, const String& message) {
+    if (level < minLevel) return;
     // Output to Serial Monitor
     String levelStr = levelToString(level);
     String timestamp = String(millis());
@@ -20,6 +21,14 @@ void LogManager::log(LogLevel level, const String& component, const String& mess
                   levelStr.c_str(), 
                   component.c_str(), 
                   message.c_str());
+}
+
+void LogManager::setMinLogLevel(LogLevel level) {
+    minLevel = level;
+}
+
+LogLevel LogManager::getMinLogLevel() const {
+    return minLevel;
 }
 
 void LogManager::logDebug(const String& component, const String& message) {

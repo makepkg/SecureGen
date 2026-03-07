@@ -1,0 +1,313 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="Backup Tools — SecureGen" page="tools">
+  <section class="page-header">
+    <p class="breadcrumb">
+      <a href="/SecureGen/">Home</a> / Tools
+    </p>
+    <h1>Backup Tools</h1>
+    <p class="description">
+      Offline tools for managing encrypted backup files from your device.
+    </p>
+  </section>
+
+  <section class="tool-cards">
+    <div class="tool-card">
+      <div class="tool-icon">🔓</div>
+      <h2>Decrypt & Edit Backups</h2>
+      <p class="tool-description">
+        Decrypt your .enc backup files in the browser. View and edit TOTP keys or passwords, 
+        change the encryption password, re-encrypt and save. Your data never leaves this device — 
+        all processing is local.
+      </p>
+      <ul class="feature-list">
+        <li>✓ Works offline</li>
+        <li>✓ Edit TOTP keys</li>
+        <li>✓ Edit passwords</li>
+        <li>✓ Re-encrypt & export</li>
+      </ul>
+      <a href="/SecureGen/tools-app.html" class="btn-tool">Open Backup Editor →</a>
+    </div>
+
+    <div class="tool-card">
+      <div class="tool-icon">💾</div>
+      <h2>Offline Use</h2>
+      <p class="tool-description">
+        Save the editor to your computer for use without any internet connection.
+      </p>
+      <ol class="steps-list">
+        <li>Open Backup Editor above</li>
+        <li>Press Ctrl+S (or Cmd+S on Mac) to save the page</li>
+        <li>Open the saved HTML file in any browser — it works fully offline</li>
+      </ol>
+      <p class="note">Note: The editor has no external dependencies.</p>
+    </div>
+  </section>
+
+  <section class="how-it-works">
+    <h2>How It Works</h2>
+    <div class="workflow">
+      <div class="workflow-step">
+        <div class="step-icon">📤</div>
+        <h3>Export from device</h3>
+        <p>Go to web cabinet → TOTP or Passwords → Export → download .enc file</p>
+      </div>
+      <div class="workflow-arrow">→</div>
+      <div class="workflow-step">
+        <div class="step-icon">🔓</div>
+        <h3>Open in editor</h3>
+        <p>Click 'Open Backup Editor', upload the .enc file, enter your admin password</p>
+      </div>
+      <div class="workflow-arrow">→</div>
+      <div class="workflow-step">
+        <div class="step-icon">📥</div>
+        <h3>Import back</h3>
+        <p>Edit entries, click 'Save Encrypted', import the new .enc file on any device</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="security-note">
+    <div class="callout callout-info">
+      <div class="callout-header">
+        <span class="callout-icon">🛡️</span>
+        <strong>Security</strong>
+      </div>
+      <p>
+        This tool runs entirely in your browser using the Web Crypto API (AES-CBC + PBKDF2). 
+        No data is sent to any server. The encryption format is identical to the device — 
+        files encrypted here can be imported directly to your ESP32.
+      </p>
+      <p class="source-link">
+        View source: 
+        <a href="https://github.com/makepkg/SecureGen/blob/main/decrypt_export.html" target="_blank" rel="noopener noreferrer">
+          github.com/makepkg/SecureGen/blob/main/decrypt_export.html
+        </a>
+      </p>
+    </div>
+  </section>
+</Layout>
+
+<style>
+  .page-header {
+    margin-bottom: 2rem;
+  }
+
+  .breadcrumb {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-bottom: 0.5rem;
+  }
+
+  .breadcrumb a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .breadcrumb a:hover {
+    text-decoration: underline;
+  }
+
+  h1 {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .description {
+    font-size: 1.1rem;
+    color: var(--text);
+    margin-bottom: 2rem;
+  }
+
+  .tool-cards {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+    margin-bottom: 3rem;
+  }
+
+  .tool-card {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 2rem;
+  }
+
+  .tool-icon {
+    font-size: 2.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .tool-card h2 {
+    font-size: 1.3rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .tool-description {
+    color: var(--text);
+    margin-bottom: 1.25rem;
+    line-height: 1.6;
+  }
+
+  .feature-list {
+    list-style: none;
+    padding: 0;
+    margin: 1.25rem 0;
+    font-size: 0.9rem;
+    color: var(--text-dim);
+  }
+
+  .feature-list li {
+    padding: 0.25rem 0;
+  }
+
+  .steps-list {
+    margin: 1.25rem 0;
+    padding-left: 1.5rem;
+    color: var(--text);
+    line-height: 1.8;
+  }
+
+  .steps-list li {
+    margin: 0.5rem 0;
+  }
+
+  .note {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    font-style: italic;
+    margin-top: 1rem;
+  }
+
+  .btn-tool {
+    display: inline-block;
+    background-color: var(--accent);
+    color: #0a0a0f;
+    font-weight: 700;
+    padding: 0.75rem 1.5rem;
+    border-radius: 6px;
+    text-decoration: none;
+    margin-top: 1rem;
+    transition: opacity 0.2s;
+  }
+
+  .btn-tool:hover {
+    opacity: 0.9;
+  }
+
+  .how-it-works {
+    margin: 3rem 0;
+  }
+
+  .workflow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 2rem;
+  }
+
+  .workflow-step {
+    flex: 1;
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    text-align: center;
+  }
+
+  .step-icon {
+    font-size: 2rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .workflow-step h3 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: var(--text-bright);
+  }
+
+  .workflow-step p {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+
+  .workflow-arrow {
+    font-size: 1.5rem;
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+
+  .security-note {
+    margin: 3rem 0;
+  }
+
+  .callout {
+    padding: 1.5rem;
+    border-radius: 8px;
+  }
+
+  .callout-info {
+    background-color: rgba(0, 229, 255, 0.06);
+    border: 1px solid rgba(0, 229, 255, 0.2);
+  }
+
+  .callout-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    color: var(--accent);
+    font-size: 1.1rem;
+  }
+
+  .callout-icon {
+    font-size: 1.3rem;
+  }
+
+  .callout p {
+    color: var(--text);
+    line-height: 1.6;
+    margin-bottom: 0.75rem;
+  }
+
+  .callout p:last-child {
+    margin-bottom: 0;
+  }
+
+  .source-link {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+
+  .source-link a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .source-link a:hover {
+    text-decoration: underline;
+  }
+
+  @media (max-width: 768px) {
+    .tool-cards {
+      grid-template-columns: 1fr;
+    }
+
+    .workflow {
+      flex-direction: column;
+    }
+
+    .workflow-arrow {
+      transform: rotate(90deg);
+    }
+  }
+</style>

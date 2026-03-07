@@ -54,6 +54,9 @@ public:
     // ❌ REMOVED: cleanupExpiredSessions() - causes race condition
     int getActiveSecureSessionCount();
     
+    // Wipe all sessions from memory
+    void wipeAllSessions();
+    
     // HTTP Middleware integration
     bool shouldBypassSecurity(const String& endpoint);
     String wrapSecureResponse(const String& clientId, const String& originalResponse);
@@ -94,7 +97,6 @@ private:
     String bytesToHex(const uint8_t* bytes, size_t length);
     bool hexToBytes(const String& hex, uint8_t* bytes, size_t maxLength);
     bool generateNonce(uint8_t* nonce, size_t length);
-    String simpleXorEncrypt(const String& data, const String& key);
     
     // mbedTLS contexts
     mbedtls_entropy_context entropy;

@@ -1,6 +1,7 @@
 #include "display_manager.h"
 #include "config.h"
 #include "log_manager.h"
+#include <qrcode_espi.h>
 
 // Helper for the animation loop
 void schedule_next_update(DisplayManager* dm, AnimationManager* am);
@@ -49,7 +50,30 @@ void DisplayManager::setTheme(Theme theme) {
 }
 
 void DisplayManager::update() {
-    animationManager.update();
+    // Check for QR code request (thread-safe)
+    if (_qrCodeRequested) {
+        _qrCodeRequested = false;
+        showQRCode(_qrCodeText, _qrCodeTimeoutSeconds);
+    }
+    
+    // Check QR code timeout and update timer
+    if (_qrCodeActive) {
+        unsigned long currentTime = millis();
+        if (currentTime >= _qrCodeTimeout) {
+            hideQRCode();
+        } else {
+            // Update timer every second
+            int secondsRemaining = (_qrCodeTimeout - currentTime) / 1000;
+            if (secondsRemaining != _lastQRTimerSeconds) {
+                _lastQRTimerSeconds = secondsRemaining;
+                updateQRTimer(secondsRemaining);
+            }
+        }
+    }
+    
+    if (!_qrCodeActive) {
+        animationManager.update();
+    }
 
     if (_totpState == TotpState::IDLE) {
         return;
@@ -81,15 +105,17 @@ void DisplayManager::update() {
 
     String textToDraw = "";
     const char charset[] = "abcdefghijklmnopqrstuvwxyz0123456789";
+    int codeLen = _newCode.length() > 0 ? _newCode.length() : 6;
 
     if (elapsedTime < scrambleDuration) {
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < codeLen; i++) {
             textToDraw += charset[random(sizeof(charset) - 1)];
         }
     } else {
         int charsToReveal = (elapsedTime - scrambleDuration) / 25;
+        if (charsToReveal > codeLen) charsToReveal = codeLen;
         textToDraw = _newCode.substring(0, charsToReveal);
-        for (int i = charsToReveal; i < 6; i++) {
+        for (int i = charsToReveal; i < codeLen; i++) {
             textToDraw += charset[random(sizeof(charset) - 1)];
         }
     }
@@ -228,6 +254,11 @@ void DisplayManager::updateHeader() {
         return;
     }
     
+    // 🚫 Не отрисовываем заголовок когда показывается QR код
+    if (_qrCodeActive) {
+        return;
+    }
+    
     headerSprite.fillSprite(_currentThemeColors->background_dark);
 
     float titleY = 20;
@@ -265,7 +296,109 @@ void DisplayManager::updateHeader() {
         drawBatteryOnSprite(_currentBatteryPercentage, false);
     }
 
+    drawClockOnSprite();
     headerSprite.pushSprite(0, 0);
+}
+
+void DisplayManager::drawClockOnSprite() {
+    struct tm timeinfo;
+    bool synced = getLocalTime(&timeinfo, 0);
+
+    // 7-segment digit: 5px wide, 9px tall, 1px lines
+    // Segments: A=top, B=top-right, C=bot-right, D=bot, E=bot-left, F=top-left, G=mid
+    // Digit origin at (dx, dy)
+    auto drawDigit = [&](int dx, int dy, int d, uint16_t col) {
+        uint16_t bg = _currentThemeColors->background_dark;
+        // Clear digit area first
+        headerSprite.fillRect(dx, dy, 5, 9, bg);
+        if (d < 0 || d > 9) {
+            // Draw '--' dash (segment G only)
+            headerSprite.drawFastHLine(dx + 1, dy + 4, 3, col);
+            return;
+        }
+        // Segment A (top)
+        if (d==0||d==2||d==3||d==5||d==6||d==7||d==8||d==9)
+            headerSprite.drawFastHLine(dx+1, dy,   3, col);
+        // Segment B (top-right)
+        if (d==0||d==1||d==2||d==3||d==4||d==7||d==8||d==9)
+            headerSprite.drawFastVLine(dx+4, dy+1, 3, col);
+        // Segment C (bot-right)
+        if (d==0||d==1||d==3||d==4||d==5||d==6||d==7||d==8||d==9)
+            headerSprite.drawFastVLine(dx+4, dy+5, 3, col);
+        // Segment D (bot)
+        if (d==0||d==2||d==3||d==5||d==6||d==8||d==9)
+            headerSprite.drawFastHLine(dx+1, dy+8, 3, col);
+        // Segment E (bot-left)
+        if (d==0||d==2||d==6||d==8)
+            headerSprite.drawFastVLine(dx,   dy+5, 3, col);
+        // Segment F (top-left)
+        if (d==0||d==4||d==5||d==6||d==8||d==9)
+            headerSprite.drawFastVLine(dx,   dy+1, 3, col);
+        // Segment G (mid)
+        if (d==2||d==3||d==4||d==5||d==6||d==8||d==9)
+            headerSprite.drawFastHLine(dx+1, dy+4, 3, col);
+    };
+
+    uint16_t col = _currentThemeColors->text_secondary;
+    int y = 4; // top-aligned, matches battery icon at y=5
+
+    if (!synced) {
+        // Show "--:--" when not synced
+        drawDigit(4,  y, -1, col);
+        drawDigit(11, y, -1, col);
+        drawDigit(21, y, -1, col);
+        drawDigit(28, y, -1, col);
+    } else {
+        int h = timeinfo.tm_hour;
+        int m = timeinfo.tm_min;
+        drawDigit(4,  y, h / 10, col);
+        drawDigit(11, y, h % 10, col);
+        drawDigit(21, y, m / 10, col);
+        drawDigit(28, y, m % 10, col);
+    }
+
+    // Colon: 2 pixels between HH and MM
+    headerSprite.drawPixel(18, y + 2, col);
+    headerSprite.drawPixel(18, y + 6, col);
+}
+
+void DisplayManager::updateClockStatus() {
+    if (!_isNoItemsPageActive) return;  // На обычных страницах спрайт сам обновляет часы
+
+    struct tm timeinfo;
+    bool synced = getLocalTime(&timeinfo, 0);
+    int h = synced ? timeinfo.tm_hour : -1;
+    int m = synced ? timeinfo.tm_min  : -1;
+
+    // Рисуем только если минута изменилась
+    static int _lastClockH = -2;
+    static int _lastClockM = -2;
+    if (h == _lastClockH && m == _lastClockM) return;
+    _lastClockH = h;
+    _lastClockM = m;
+
+    uint16_t col = _currentThemeColors->text_secondary;
+    uint16_t bg  = _currentThemeColors->background_dark;
+    int cy = 4;
+
+    auto drawDigitTft = [&](int dx, int dy, int d) {
+        tft.fillRect(dx, dy, 5, 9, bg);
+        if (d < 0 || d > 9) { tft.drawFastHLine(dx+1, dy+4, 3, col); return; }
+        if (d==0||d==2||d==3||d==5||d==6||d==7||d==8||d==9) tft.drawFastHLine(dx+1, dy,   3, col);
+        if (d==0||d==1||d==2||d==3||d==4||d==7||d==8||d==9) tft.drawFastVLine(dx+4, dy+1, 3, col);
+        if (d==0||d==1||d==3||d==4||d==5||d==6||d==7||d==8||d==9) tft.drawFastVLine(dx+4, dy+5, 3, col);
+        if (d==0||d==2||d==3||d==5||d==6||d==8||d==9) tft.drawFastHLine(dx+1, dy+8, 3, col);
+        if (d==0||d==2||d==6||d==8) tft.drawFastVLine(dx,   dy+5, 3, col);
+        if (d==0||d==4||d==5||d==6||d==8||d==9) tft.drawFastVLine(dx,   dy+1, 3, col);
+        if (d==2||d==3||d==4||d==5||d==6||d==8||d==9) tft.drawFastHLine(dx+1, dy+4, 3, col);
+    };
+
+    drawDigitTft(4,  cy, h < 0 ? -1 : h / 10);
+    drawDigitTft(11, cy, h < 0 ? -1 : h % 10);
+    drawDigitTft(21, cy, m < 0 ? -1 : m / 10);
+    drawDigitTft(28, cy, m < 0 ? -1 : m % 10);
+    tft.drawPixel(18, cy+2, col);
+    tft.drawPixel(18, cy+6, col);
 }
 
 void DisplayManager::drawBatteryOnSprite(int percentage, bool isCharging, int chargingValue) {
@@ -326,7 +459,14 @@ void DisplayManager::drawTotpText(const String& textToDraw) {
     totpSprite.setTextColor(_currentThemeColors->text_primary, _currentThemeColors->background_light);
     
     // Уменьшаем размер шрифта для длинного текста (например "NOT SYNCED")
-    int textSize = (textToDraw.length() > 6) ? 2 : 4;
+    int textSize;
+    if (textToDraw.length() <= 6) {
+        textSize = 4;        // 6 digits - large
+    } else if (textToDraw.length() <= 8) {
+        textSize = 3;        // 8 digits - medium
+    } else {
+        textSize = 2;        // "NOT SYNCED" and other status text - same as before
+    }
     totpSprite.setTextSize(textSize);
     totpSprite.drawString(textToDraw, totpSprite.width() / 2, totpSprite.height() / 2);
 
@@ -344,7 +484,12 @@ void DisplayManager::drawTotpText(const String& textToDraw) {
 }
 
 
-void DisplayManager::updateTOTPCode(const String& code, int timeRemaining) {
+void DisplayManager::updateTOTPCode(const String& code, int timeRemaining, int period) {
+    // 🚫 Не обновляем TOTP когда показывается QR код
+    if (_qrCodeActive) {
+        return;
+    }
+    
     if (_totpContainerNeedsRedraw) {
         drawTotpContainer();
     }
@@ -386,19 +531,29 @@ void DisplayManager::updateTOTPCode(const String& code, int timeRemaining) {
         // Очищаем область прогресс-бара
         tft.fillRect(barX - shadowOffset, barY - shadowOffset, barWidth + 40 + shadowOffset, barHeight + shadowOffset * 2, _currentThemeColors->background_dark);
         
-        // Рисуем рамку и фон
-        tft.fillRoundRect(barX + shadowOffset, barY + shadowOffset, barWidth, barHeight, barCornerRadius, _currentThemeColors->shadow_color);
-        tft.drawRoundRect(barX, barY, barWidth, barHeight, barCornerRadius, _currentThemeColors->text_secondary);
-        tft.fillRoundRect(barX, barY, barWidth, barHeight, barCornerRadius, _currentThemeColors->background_light);
+        // Check if this is HOTP mode (timeRemaining == -1)
+        if (timeRemaining == -1) {
+            // HOTP: Draw refresh icon instead of progress bar
+            tft.setTextColor(_currentThemeColors->text_secondary, _currentThemeColors->background_dark);
+            tft.setTextSize(2);
+            tft.setTextDatum(MC_DATUM);
+            tft.drawString("HOTP - Static Code", tft.width() / 2, barY + barHeight / 2);
+        } else {
+            // TOTP: Draw progress bar and timer
+            // Рисуем рамку и фон
+            tft.fillRoundRect(barX + shadowOffset, barY + shadowOffset, barWidth, barHeight, barCornerRadius, _currentThemeColors->shadow_color);
+            tft.drawRoundRect(barX, barY, barWidth, barHeight, barCornerRadius, _currentThemeColors->text_secondary);
+            tft.fillRoundRect(barX, barY, barWidth, barHeight, barCornerRadius, _currentThemeColors->background_light);
 
-        // Рисуем заполнение
-        int fillWidth = map(timeRemaining, CONFIG_TOTP_STEP_SIZE, 0, barWidth, 0);
-        tft.fillRoundRect(barX, barY, fillWidth, barHeight, barCornerRadius, _currentThemeColors->accent_primary);
+            // Рисуем заполнение
+            int fillWidth = map(timeRemaining, period, 0, barWidth, 0);
+            tft.fillRoundRect(barX, barY, fillWidth, barHeight, barCornerRadius, _currentThemeColors->accent_primary);
 
-        // Рисуем текст времени
-        tft.setTextColor(_currentThemeColors->text_secondary, _currentThemeColors->background_dark);
-        tft.setTextSize(2);
-        tft.drawString(String(timeRemaining) + "s", barX + barWidth + 20, barY + barHeight / 2);
+            // Рисуем текст времени
+            tft.setTextColor(_currentThemeColors->text_secondary, _currentThemeColors->background_dark);
+            tft.setTextSize(2);
+            tft.drawString(String(timeRemaining) + "s", barX + barWidth + 20, barY + barHeight / 2);
+        }
         
         lastTimeRemaining = timeRemaining;
     }
@@ -682,6 +837,45 @@ void DisplayManager::drawBleInitLoader(int progress) {
     drawGenericLoader(progress, "Activating BLE...");
 }
 
+void DisplayManager::drawHOTPLoader(int progress) {
+    if (_qrCodeActive) return;
+    
+    // Оптимизированная перерисовка - перерисовываем только при изменениях
+    bool needsFullRedraw = !_loaderActive || _lastLoaderText != "HOTP";
+    bool needsProgressUpdate = _lastLoaderProgress != progress;
+    
+    int barY = tft.height() - 30;
+    int barHeight = 10;
+    int barWidth = (tft.width() - 64) * 0.8;
+    int barX = (tft.width() - barWidth) / 2;
+    int shadowOffset = 2;
+    int barCornerRadius = 5;
+
+    if (needsFullRedraw) {
+        // Clear area
+        tft.fillRect(barX - shadowOffset, barY - shadowOffset, barWidth + 40 + shadowOffset, barHeight + shadowOffset * 2, _currentThemeColors->background_dark);
+
+        // Draw shadow, border, background
+        tft.fillRoundRect(barX + shadowOffset, barY + shadowOffset, barWidth, barHeight, barCornerRadius, _currentThemeColors->shadow_color);
+        tft.drawRoundRect(barX, barY, barWidth, barHeight, barCornerRadius, _currentThemeColors->text_secondary);
+        tft.fillRoundRect(barX, barY, barWidth, barHeight, barCornerRadius, _currentThemeColors->background_light);
+
+        _lastLoaderText = "HOTP";
+        _loaderActive = true;
+    }
+    
+    if (needsProgressUpdate) {
+        // Clear interior before redrawing fill
+        tft.fillRoundRect(barX + 1, barY + 1, barWidth - 2, barHeight - 2, barCornerRadius, _currentThemeColors->background_light);
+        
+        // Draw fill based on progress (0-100)
+        int fillWidth = map(progress, 0, 100, 0, barWidth);
+        tft.fillRoundRect(barX, barY, fillWidth, barHeight, barCornerRadius, _currentThemeColors->accent_primary);
+        
+        _lastLoaderProgress = progress;
+    }
+}
+
 void DisplayManager::drawGenericLoader(int progress, const String& text) {
     // Оптимизированная перерисовка - перерисовываем только при изменениях
     bool needsFullRedraw = !_loaderActive || _lastLoaderText != text;
@@ -743,6 +937,21 @@ void DisplayManager::hideLoader() {
     _lastLoaderProgress = -1;
     _isNoItemsPageActive = false; // Сбрасываем флаг, чтобы вызвать полную перерисовку
     tft.fillScreen(_currentThemeColors->background_dark); // Очищаем экран
+}
+
+void DisplayManager::resetLoaderState() {
+    _loaderActive = false;
+    _lastLoaderText = "";
+    _lastLoaderProgress = -1;
+}
+
+void DisplayManager::eraseLoaderArea() {
+    _loaderActive = false;
+    _lastLoaderText = "";
+    _lastLoaderProgress = -1;
+    // Clear only the loader bar area at bottom of screen
+    int barY = tft.height() - 30;
+    tft.fillRect(0, barY - 10, tft.width(), 40, _currentThemeColors->background_dark);
 }
 
 void DisplayManager::drawBleAdvertisingPage(const String& deviceName, const String& status, int timeLeft) {
@@ -878,6 +1087,53 @@ void DisplayManager::drawNoItemsPage(const String& text) {
         tft.drawLine(wifiX + 1, wifiY + 8, wifiX + 8, wifiY + 1, _currentThemeColors->text_secondary);
         tft.fillCircle(wifiX + 4, wifiY + 10, 2, _currentThemeColors->text_secondary);
     }
+
+    // 🕐 Часы в левом верхнем углу (прямо в tft, не спрайт)
+    {
+        struct tm timeinfo;
+        bool synced = getLocalTime(&timeinfo, 0);
+        uint16_t col = _currentThemeColors->text_secondary;
+        uint16_t bg  = _currentThemeColors->background_dark;
+        int cy = 4;
+
+        auto drawDigitTft = [&](int dx, int dy, int d) {
+            tft.fillRect(dx, dy, 5, 9, bg);
+            if (d < 0 || d > 9) {
+                tft.drawFastHLine(dx+1, dy+4, 3, col);
+                return;
+            }
+            if (d==0||d==2||d==3||d==5||d==6||d==7||d==8||d==9)
+                tft.drawFastHLine(dx+1, dy,   3, col);
+            if (d==0||d==1||d==2||d==3||d==4||d==7||d==8||d==9)
+                tft.drawFastVLine(dx+4, dy+1, 3, col);
+            if (d==0||d==1||d==3||d==4||d==5||d==6||d==7||d==8||d==9)
+                tft.drawFastVLine(dx+4, dy+5, 3, col);
+            if (d==0||d==2||d==3||d==5||d==6||d==8||d==9)
+                tft.drawFastHLine(dx+1, dy+8, 3, col);
+            if (d==0||d==2||d==6||d==8)
+                tft.drawFastVLine(dx,   dy+5, 3, col);
+            if (d==0||d==4||d==5||d==6||d==8||d==9)
+                tft.drawFastVLine(dx,   dy+1, 3, col);
+            if (d==2||d==3||d==4||d==5||d==6||d==8||d==9)
+                tft.drawFastHLine(dx+1, dy+4, 3, col);
+        };
+
+        if (!synced) {
+            drawDigitTft(4,  cy, -1);
+            drawDigitTft(11, cy, -1);
+            drawDigitTft(21, cy, -1);
+            drawDigitTft(28, cy, -1);
+        } else {
+            int h = timeinfo.tm_hour;
+            int m = timeinfo.tm_min;
+            drawDigitTft(4,  cy, h / 10);
+            drawDigitTft(11, cy, h % 10);
+            drawDigitTft(21, cy, m / 10);
+            drawDigitTft(28, cy, m % 10);
+        }
+        tft.drawPixel(18, cy+2, col);
+        tft.drawPixel(18, cy+6, col);
+    }
     
     // 📏 Размеры округленной рамки (в области TOTP кода)
     int boxWidth = 180;
@@ -899,4 +1155,91 @@ void DisplayManager::drawNoItemsPage(const String& text) {
     
     tft.setTextColor(_currentThemeColors->text_secondary);
     tft.drawString("Add via Web UI", tft.width() / 2, tft.height() / 2 + 8);
+}
+
+
+// ==================== QR CODE DISPLAY ====================
+
+void DisplayManager::showQRCode(const String& text, int timeoutSeconds) {
+    LOG_INFO("DisplayManager", "Showing QR code for " + String(timeoutSeconds) + " seconds");
+    LOG_DEBUG("DisplayManager", "QR text length: " + String(text.length()) + " chars");
+    
+    // Save current state
+    _qrCodeActive = true;
+    _qrCodeTimeout = millis() + (timeoutSeconds * 1000);
+    
+    // CRITICAL: Full screen clear
+    tft.fillScreen(_currentThemeColors->background_dark);
+    
+    // Create QR code with QRcode_eSPI
+    QRcode_eSPI qrcode(&tft);
+    
+    // Extract key name from TOTP URI
+    String keyName = "";
+    int nameStart = text.indexOf("totp/");
+    if (nameStart != -1) {
+        nameStart += 5;
+        int nameEnd = text.indexOf("?", nameStart);
+        if (nameEnd != -1) {
+            keyName = text.substring(nameStart, nameEnd);
+        }
+    }
+    
+    // Header with key name (ABOVE QR code)
+    if (keyName.length() > 0) {
+        tft.setTextColor(_currentThemeColors->text_primary, _currentThemeColors->background_dark);
+        tft.setTextSize(1);
+        tft.setTextDatum(MC_DATUM);
+        
+        if (keyName.length() > 30) {
+            keyName = keyName.substring(0, 27) + "...";
+        }
+        
+        tft.drawString(keyName, 120, 10);
+    }
+    
+    // Generate and display QR code
+    // QRcode_eSPI automatically centers and scales
+    qrcode.init();
+    qrcode.create(text);
+    
+    // Timer at bottom of screen
+    _qrCodeTimerY = 120;
+    updateQRTimer(timeoutSeconds);
+    
+    LOG_INFO("DisplayManager", "QR code displayed");
+}
+
+void DisplayManager::updateQRTimer(int secondsRemaining) {
+    // Clear only timer area
+    int timerWidth = 40;
+    int timerX = (240 - timerWidth) / 2;
+    tft.fillRect(timerX - 5, _qrCodeTimerY - 10, timerWidth + 10, 15, _currentThemeColors->background_dark);
+    
+    // Draw updated timer (centered)
+    tft.setTextColor(_currentThemeColors->text_secondary, _currentThemeColors->background_dark);
+    tft.setTextSize(1);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(String(secondsRemaining) + "s", 120, _qrCodeTimerY);
+}
+
+void DisplayManager::hideQRCode() {
+    if (_qrCodeActive) {
+        LOG_INFO("DisplayManager", "Hiding QR code");
+        _qrCodeActive = false;
+        _qrCodeTimeout = 0;
+        _lastQRTimerSeconds = -1;
+        
+        // Clear screen and return to normal mode
+        tft.fillScreen(_currentThemeColors->background_dark);
+        _totpContainerNeedsRedraw = true;
+    }
+}
+
+// Thread-safe request to show QR code (called from web server)
+void DisplayManager::requestShowQRCode(const String& text, int timeoutSeconds) {
+    _qrCodeText = text;
+    _qrCodeTimeoutSeconds = timeoutSeconds;
+    _qrCodeRequested = true;
+    LOG_INFO("DisplayManager", "QR code show requested (will be displayed in main loop)");
 }

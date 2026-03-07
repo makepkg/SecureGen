@@ -11,35 +11,45 @@ public:
     PinManager(DisplayManager& display);
     void begin();
     
-    // Separate methods for device and BLE PIN control
-    bool isPinEnabledForDevice();
-    bool isPinEnabledForBle();
-    bool isPinSet();
-    bool requestPin();
+    // --- NEW: First boot PIN setup ---
+    // Запрашивает выбор длины PIN при первой загрузке
+    int requestPinLengthSelection();
+    // Запрашивает создание нового PIN при первой загрузке
+    bool requestNewPinSetup();
     
-    // Methods for web server interaction
-    void setPin(const String& newPin);
-    void setPinEnabledForDevice(bool enabled);
+    // --- Device PIN control ---
+    bool requestDevicePin(); // Запрашивает PIN для разблокировки устройства
+    bool isDevicePinRequired(); // Проверяет нужен ли PIN для загрузки
+    
+    // --- BLE PIN control (legacy, для обратной совместимости) ---
+    bool isPinEnabledForBle();
     void setPinEnabledForBle(bool enabled);
+    bool requestDeviceBlePinForTransmission(); // Запрашивает Device BLE PIN перед отправкой пароля
+    
+    // --- Configuration ---
     int getPinLength();
     void setPinLength(int newLength);
     void saveConfig();
     void loadPinConfig();
     
-    // Legacy method for backward compatibility
-    bool isPinEnabled(); // Returns true if either device or BLE PIN is enabled
-    void setEnabled(bool enabled); // Sets both device and BLE to the same value
+    // --- Legacy methods (deprecated, для совместимости с web_server) ---
+    bool isPinEnabled(); // Returns true if device PIN is required
+    void setEnabled(bool enabled); // Deprecated
+    bool isPinSet(); // Deprecated - всегда true если device.key зашифрован
+    void setPin(const String& newPin); // Deprecated - используйте changePinEncryption
+    bool isPinEnabledForDevice(); // Deprecated
+    void setPinEnabledForDevice(bool enabled); // Deprecated
+    
+    // --- Public PIN input method (used by main.cpp for device confirmation) ---
+    String requestPinInput(const String& title, bool isConfirmScreen = false); // Универсальный ввод PIN
 
 private:
     DisplayManager& displayManager;
     int currentPinLength = DEFAULT_PIN_LENGTH;
-    bool enabledForDevice = false;
-    bool enabledForBle = false;
-    String pinHash = "";
+    bool enabledForBle = false; // Только для BLE PIN
 
     void savePinConfig();
-    bool checkPin(const String& pin);
-    void drawPinScreen();
+    void drawPinScreen(const String& title, bool isConfirmScreen = false);
     void updatePinScreen(int currentPosition, int currentDigit, const String& enteredPin);
 };
 

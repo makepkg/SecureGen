@@ -292,3 +292,12 @@ bool PasswordManager::savePasswords() {
         return false;
     }
 }
+
+void PasswordManager::wipePasswords() {
+    for (auto& entry : passwords) {
+        volatile char* p = const_cast<volatile char*>(entry.password.c_str());
+        for (size_t i = 0; i < entry.password.length(); i++) p[i] = 0;
+        entry.password = "";
+    }
+    passwords.clear();
+}

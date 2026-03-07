@@ -1,0 +1,93 @@
+name: Build and Release Firmware
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: platformio-${{ hashFiles('platformio.ini') }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO and esptool
+        run: pip install platformio esptool
+
+      - name: Build firmware
+        run: pio run -e lilygo-t-display
+
+      - name: Merge binaries
+        run: |
+          esptool --chip esp32 merge-bin \
+            -o merged-firmware.bin \
+            --flash-mode dio \
+            --flash-freq 40m \
+            --flash-size 4MB \
+            0x1000 .pio/build/lilygo-t-display/bootloader.bin \
+            0x8000 .pio/build/lilygo-t-display/partitions.bin \
+            0x10000 .pio/build/lilygo-t-display/firmware.bin
+
+      - name: Copy binaries to website
+        run: |
+          mkdir -p website/public/firmware
+          cp .pio/build/lilygo-t-display/bootloader.bin website/public/firmware/bootloader.bin
+          cp .pio/build/lilygo-t-display/partitions.bin website/public/firmware/partitions.bin
+          cp .pio/build/lilygo-t-display/firmware.bin website/public/firmware/firmware.bin
+          cp merged-firmware.bin website/public/firmware/merged-firmware.bin
+
+      - name: Update manifest version
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          cat > website/public/firmware/manifest.json << EOF
+          {
+            "name": "SecureGen",
+            "version": "${TAG}",
+            "new_install_prompt_erase": true,
+            "builds": [
+              {
+                "chipFamily": "ESP32",
+                "parts": [
+                  { "path": "/SecureGen/firmware/bootloader.bin", "offset": 4096 },
+                  { "path": "/SecureGen/firmware/partitions.bin", "offset": 32768 },
+                  { "path": "/SecureGen/firmware/firmware.bin",   "offset": 65536 }
+                ]
+              }
+            ]
+          }
+          EOF
+
+      - name: Commit firmware to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add website/public/firmware/
+          git commit -m "firmware: update binaries for ${GITHUB_REF#refs/tags/}"
+          git push origin master
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            merged-firmware.bin
+            .pio/build/lilygo-t-display/bootloader.bin
+            .pio/build/lilygo-t-display/partitions.bin
+            .pio/build/lilygo-t-display/firmware.bin

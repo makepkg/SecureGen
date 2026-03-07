@@ -177,19 +177,10 @@ bool WebServerSecureIntegration::processSecureRequest(AsyncWebServerRequest* req
     }
     
     // Check for simple/fallback encryption mode
-    bool isSimpleSecure = request->hasHeader("X-Simple-Secure");
     // ИСПРАВЛЕНИЕ: Обфусцированные заголовки + принудительное шифрование для валидных сессий
     bool isFullSecure = request->hasHeader("X-Secure-Request") || request->hasHeader("X-Security-Level") || 
                        (clientId.length() > 0 && secureLayer.isSecureSessionValid(clientId));
-    
-    if (isSimpleSecure) {
-        // Simple fallback encryption mode - don't validate secure session
-        LOG_DEBUG("🔐", "Fallback decrypt: " + clientId.substring(0,8) + "...");
-        // For simple mode, we don't decrypt the body, just pass it through
-        // The body is already base64 encoded by client
-        return true;
-    }
-    
+        
     if (clientId.length() == 0 || !secureLayer.isSecureSessionValid(clientId)) {
         return false; // No secure session, process as regular request
     }
@@ -211,42 +202,13 @@ IRAM_ATTR void WebServerSecureIntegration::sendSecureResponse(AsyncWebServerRequ
     }
     
     // Check for simple/fallback encryption mode
-    bool isSimpleSecure = request->hasHeader("X-Simple-Secure");
     // ИСПРАВЛЕНИЕ: Обфусцированные заголовки + принудительное шифрование для валидных сессий
     bool isFullSecure = request->hasHeader("X-Secure-Request") || request->hasHeader("X-Security-Level") || 
                        (clientId.length() > 0 && secureLayer.isSecureSessionValid(clientId));
-    
-    if (isSimpleSecure) {
-        // Simple fallback encryption - just encode response with Base64
-        LOG_DEBUG("🔐", "Fallback encrypt: " + String(content.length()) + "b → " + clientId.substring(0,8) + "...");
         
-        // Simple Base64 encoding for fallback encryption
-        String base64Content = "";
-        size_t len = content.length();
-        const char* chars = content.c_str();
-        
-        // Simple Base64 encoding (basic implementation)
-        const char* base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        for (size_t i = 0; i < len; i += 3) {
-            unsigned char a = chars[i];
-            unsigned char b = (i + 1 < len) ? chars[i + 1] : 0;
-            unsigned char c = (i + 2 < len) ? chars[i + 2] : 0;
-            
-            unsigned int bitmap = (a << 16) | (b << 8) | c;
-            
-            base64Content += base64_chars[(bitmap >> 18) & 0x3F];
-            base64Content += base64_chars[(bitmap >> 12) & 0x3F];
-            base64Content += (i + 1 < len) ? base64_chars[(bitmap >> 6) & 0x3F] : '=';
-            base64Content += (i + 2 < len) ? base64_chars[bitmap & 0x3F] : '=';
-        }
-        
-        request->send(code, contentType, base64Content);
-        return;
-    }
-    
     if (clientId.length() == 0 || !secureLayer.isSecureSessionValid(clientId)) {
-        // No secure session, send regular response
-        request->send(code, contentType, content);
+        LOG_ERROR("SecureIntegration", "No valid secure session - refusing plaintext fallback");
+        request->send(401, "application/json", "{\"error\":\"secure_session_required\"}");
         return;
     }
     
@@ -262,8 +224,9 @@ IRAM_ATTR void WebServerSecureIntegration::sendSecureResponse(AsyncWebServerRequ
         return;
     }
     
-    // Default: send regular response
-    request->send(code, contentType, content);
+    // No encryption mode detected - refuse to send sensitive data
+    LOG_ERROR("SecureIntegration", "Encryption mode unknown - refusing plaintext fallback");
+    request->send(500, "application/json", "{\"error\":\"encryption_required\"}");
 }
 
 String WebServerSecureIntegration::getClientId(AsyncWebServerRequest* request) {

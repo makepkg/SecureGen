@@ -62,50 +62,15 @@ void URLObfuscationIntegration::registerDualEndpointWithUpload(AsyncWebServer& s
 void URLObfuscationIntegration::addObfuscationAPIEndpoints(AsyncWebServer& server, URLObfuscationManager& obfuscationManager) {
     LOG_INFO("URLObfuscationAPI", "Adding URL obfuscation API endpoints");
     
-    // API endpoint для получения текущих obfuscated mappings
+    
+#ifdef DEBUG_BUILD
+    // Debug only: full mappings endpoint (not available in production)
     server.on("/api/obfuscation/mappings", HTTP_GET, [&obfuscationManager](AsyncWebServerRequest *request) {
         
         String mappingsJson = obfuscationManager.getObfuscatedMappingJSON();
         request->send(200, "application/json", mappingsJson);
     });
-    
-    // API endpoint для проверки статуса obfuscation
-    server.on("/api/obfuscation/status", HTTP_GET, [&obfuscationManager](AsyncWebServerRequest *request) {
-        
-        JsonDocument doc;
-        doc["enabled"] = true;
-        doc["mappings_count"] = obfuscationManager.getActiveMappingsCount();
-        doc["last_rotation"] = obfuscationManager.getLastRotationTime();
-        doc["rotation_needed"] = obfuscationManager.needsRotation();
-        
-        // Добавляем информацию о критических endpoints
-        JsonArray endpoints = doc["critical_endpoints"].to<JsonArray>();
-        for (const String& endpoint : obfuscationManager.getAllCriticalEndpoints()) {
-            JsonObject endpointObj = endpoints.add<JsonObject>();
-            endpointObj["real"] = endpoint;
-            endpointObj["obfuscated"] = obfuscationManager.obfuscateURL(endpoint);
-        }
-        
-        String response;
-        serializeJson(doc, response);
-        request->send(200, "application/json", response);
-    });
-    
-    // API endpoint для форсированной регенерации mappings (для debugging)
-    server.on("/api/obfuscation/regenerate", HTTP_POST, [&obfuscationManager](AsyncWebServerRequest *request) {
-        LOG_INFO("URLObfuscationAPI", "Manual regeneration requested");
-        
-        obfuscationManager.generateDailyMapping();
-        
-        JsonDocument doc;
-        doc["status"] = "success";
-        doc["message"] = "URL mappings regenerated";
-        doc["new_mappings_count"] = obfuscationManager.getActiveMappingsCount();
-        
-        String response;
-        serializeJson(doc, response);
-        request->send(200, "application/json", response);
-    });
+#endif
     
     LOG_INFO("URLObfuscationAPI", "URL obfuscation API endpoints added");
 }

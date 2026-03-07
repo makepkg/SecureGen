@@ -27,7 +27,7 @@ bool KeyManager::addKey(const String& name, const String& secret) {
     }
     for (const auto& key : keys) {
         if (key.name == name) {
-            LOG_WARNING("KeyManager", "Key already exists: " + name);
+            LOG_WARNING("KeyManager", "Key already exists (duplicate name)");
             return false;
         }
     }
@@ -40,8 +40,56 @@ bool KeyManager::addKey(const String& name, const String& secret) {
     newKey.name = name;
     newKey.secret = secret; 
     newKey.order = maxOrder + 1;
+    // Используем значения по умолчанию для остальных полей
     keys.push_back(newKey);
-    LOG_INFO("KeyManager", "Added TOTP key: " + name);
+    LOG_INFO("KeyManager", "Added TOTP key at index " + String(keys.size() - 1));
+    bool success = saveKeys();
+    if (!success) {
+        LOG_ERROR("KeyManager", "Failed to save keys after adding: " + name);
+    }
+    return success;
+}
+
+bool KeyManager::addKeyExtended(const String& name, const String& secret,
+                               TOTPType type, TOTPAlgorithm algo,
+                               uint8_t digits, uint16_t period) {
+    if (name.isEmpty() || secret.isEmpty()) {
+        LOG_WARNING("KeyManager", "Cannot add key with empty name or secret");
+        return false;
+    }
+    
+    // Проверка на дубликаты
+    for (const auto& key : keys) {
+        if (key.name == name) {
+            LOG_WARNING("KeyManager", "Key already exists (duplicate name)");
+            return false;
+        }
+    }
+    
+    // Найти максимальный порядок
+    int maxOrder = 0;
+    for (const auto& key : keys) {
+        if (key.order > maxOrder) maxOrder = key.order;
+    }
+    
+    TOTPKey newKey;
+    newKey.name = name;
+    newKey.secret = secret;
+    newKey.order = maxOrder + 1;
+    newKey.type = type;
+    newKey.algorithm = algo;
+    newKey.digits = digits;
+    newKey.period = period;
+    newKey.counter = 0; // Начальное значение
+    
+    keys.push_back(newKey);
+    
+    LOG_INFO("KeyManager", "Added extended TOTP key at index " + String(keys.size() - 1));
+    LOG_DEBUG("KeyManager", "Key params: [Type=" + String(type == TOTPType::HOTP ? "HOTP" : "TOTP") +
+             ", Algo=" + String(algo == TOTPAlgorithm::SHA1 ? "SHA1" : 
+                               algo == TOTPAlgorithm::SHA256 ? "SHA256" : "SHA512") +
+             ", Digits=" + String(digits) + ", Period=" + String(period) + "]");
+    
     bool success = saveKeys();
     if (!success) {
         LOG_ERROR("KeyManager", "Failed to save keys after adding: " + name);
@@ -61,7 +109,7 @@ bool KeyManager::updateKey(int index, const String& name, const String& secret) 
     keys[index].name = name;
     keys[index].secret = secret;
     // порядок остается прежний
-    LOG_INFO("KeyManager", "Updated TOTP key at index " + String(index) + " to: " + name);
+    LOG_INFO("KeyManager", "Updated TOTP key at index " + String(index));
     bool success = saveKeys();
     if (!success) {
         LOG_ERROR("KeyManager", "Failed to save keys after update");
@@ -69,14 +117,62 @@ bool KeyManager::updateKey(int index, const String& name, const String& secret) 
     return success;
 }
 
+bool KeyManager::updateKeyExtended(int index, const String& name, const String& secret,
+                                  TOTPType type, TOTPAlgorithm algo,
+                                  uint8_t digits, uint16_t period) {
+    if (index < 0 || index >= keys.size()) {
+        LOG_WARNING("KeyManager", "Invalid key index for update: " + String(index));
+        return false;
+    }
+    if (name.isEmpty() || secret.isEmpty()) {
+        LOG_WARNING("KeyManager", "Cannot update key with empty name or secret");
+        return false;
+    }
+    
+    keys[index].name = name;
+    keys[index].secret = secret;
+    keys[index].type = type;
+    keys[index].algorithm = algo;
+    keys[index].digits = digits;
+    keys[index].period = period;
+    // order и counter остаются прежними
+    
+    LOG_INFO("KeyManager", "Updated extended TOTP key at index " + String(index));
+    bool success = saveKeys();
+    if (!success) {
+        LOG_ERROR("KeyManager", "Failed to save keys after update");
+    }
+    return success;
+}
+
+bool KeyManager::incrementHOTPCounter(int index) {
+    if (index < 0 || index >= keys.size()) {
+        LOG_WARNING("KeyManager", "Invalid key index for counter increment: " + String(index));
+        return false;
+    }
+    
+    if (keys[index].type != TOTPType::HOTP) {
+        LOG_WARNING("KeyManager", "Cannot increment counter for non-HOTP key at index " + String(index));
+        return false;
+    }
+    
+    keys[index].counter++;
+    LOG_DEBUG("KeyManager", "Incremented HOTP counter at index " + String(index) + " to " + String(keys[index].counter));
+    
+    return saveKeys();
+}
+
+TOTPKey& KeyManager::getKeyRef(int index) {
+    return keys[index];
+}
+
 bool KeyManager::removeKey(int index) {
     if (index < 0 || index >= keys.size()) {
         LOG_WARNING("KeyManager", "Invalid key index for removal: " + String(index));
         return false;
     }
-    String removedName = keys[index].name;
     keys.erase(keys.begin() + index);
-    LOG_INFO("KeyManager", "Removed TOTP key: " + removedName);
+    LOG_INFO("KeyManager", "Removed TOTP key at index " + String(index));
     bool success = saveKeys();
     if (!success) {
         LOG_ERROR("KeyManager", "Failed to save keys after removal");
@@ -142,6 +238,24 @@ bool KeyManager::replaceAllKeys(const String& jsonContent) {
         key.name = obj["name"].as<String>();
         key.secret = obj["secret"].as<String>();
         key.order = obj["order"] | currentOrder++;  // Используем существующий order или назначаем по порядку
+        
+        // Читаем расширенные метаданные (с обратной совместимостью)
+        String typeStr = obj["type"] | "T";
+        key.type = (typeStr == "H") ? TOTPType::HOTP : TOTPType::TOTP;
+        
+        String algoStr = obj["algorithm"] | "1";
+        if (algoStr == "256") {
+            key.algorithm = TOTPAlgorithm::SHA256;
+        } else if (algoStr == "512") {
+            key.algorithm = TOTPAlgorithm::SHA512;
+        } else {
+            key.algorithm = TOTPAlgorithm::SHA1;
+        }
+        
+        key.digits = obj["digits"] | 6;
+        key.period = obj["period"] | 30;
+        key.counter = obj["counter"] | 0;
+        
         keys.push_back(key);
     }
 
@@ -193,13 +307,50 @@ bool KeyManager::loadKeys() {
     keys.clear();
     JsonArray array = doc.as<JsonArray>();
     int currentOrder = 0;
+    
     for (JsonObject obj : array) {
         TOTPKey key;
-        key.name = obj["name"].as<String>(); 
-        key.secret = obj["secret"].as<String>();
-        key.order = obj["order"] | currentOrder++;  // Используем существующий order или назначаем по порядку
+        
+        // Обратная совместимость: поддержка старого и нового формата
+        if (obj.containsKey("name")) {
+            // Старый формат или новый полный формат
+            key.name = obj["name"].as<String>();
+            key.secret = obj["secret"].as<String>();
+            key.order = obj["order"] | currentOrder++;
+        } else if (obj.containsKey("n")) {
+            // Новый компактный формат
+            key.name = obj["n"].as<String>();
+            key.secret = obj["s"].as<String>();
+            key.order = obj["o"] | currentOrder++;
+        } else {
+            LOG_WARNING("KeyManager", "Skipping invalid key entry");
+            continue;
+        }
+        
+        // Парсинг расширенных параметров (новый формат)
+        if (obj.containsKey("t")) {
+            String typeStr = obj["t"] | "T";
+            key.type = (typeStr == "H") ? TOTPType::HOTP : TOTPType::TOTP;
+        }
+        
+        if (obj.containsKey("a")) {
+            String algoStr = obj["a"] | "1";
+            if (algoStr == "256") {
+                key.algorithm = TOTPAlgorithm::SHA256;
+            } else if (algoStr == "512") {
+                key.algorithm = TOTPAlgorithm::SHA512;
+            } else {
+                key.algorithm = TOTPAlgorithm::SHA1;
+            }
+        }
+        
+        key.digits = obj["d"] | 6;
+        key.period = obj["p"] | 30;
+        key.counter = obj["c"] | 0;
+        
         keys.push_back(key);
     }
+    
     LOG_INFO("KeyManager", "Loaded " + String(keys.size()) + " TOTP keys successfully");
     return true;
 }
@@ -208,11 +359,39 @@ bool KeyManager::saveKeys() {
     LOG_DEBUG("KeyManager", "Saving TOTP keys to file");
     JsonDocument doc;
     JsonArray array = doc.to<JsonArray>();
+    
     for (const auto& key : keys) {
         JsonObject obj = array.add<JsonObject>();
-        obj["name"] = key.name;
-        obj["secret"] = key.secret;
-        obj["order"] = key.order;
+        
+        // Компактный формат с однобуквенными ключами
+        obj["n"] = key.name;
+        obj["s"] = key.secret;
+        obj["o"] = key.order;
+        
+        // Сохраняем только если отличается от значений по умолчанию
+        if (key.type != TOTPType::TOTP) {
+            obj["t"] = (key.type == TOTPType::HOTP) ? "H" : "T";
+        }
+        
+        if (key.algorithm != TOTPAlgorithm::SHA1) {
+            if (key.algorithm == TOTPAlgorithm::SHA256) {
+                obj["a"] = "256";
+            } else if (key.algorithm == TOTPAlgorithm::SHA512) {
+                obj["a"] = "512";
+            }
+        }
+        
+        if (key.digits != 6) {
+            obj["d"] = key.digits;
+        }
+        
+        if (key.period != 30) {
+            obj["p"] = key.period;
+        }
+        
+        if (key.counter != 0) {
+            obj["c"] = key.counter;
+        }
     }
     
     String json_string;
@@ -244,4 +423,13 @@ bool KeyManager::saveKeys() {
         LOG_ERROR("KeyManager", "Failed to write encrypted keys data");
         return false;
     }
+}
+
+void KeyManager::wipeSecrets() {
+    for (auto& key : keys) {
+        volatile char* p = const_cast<volatile char*>(key.secret.c_str());
+        for (size_t i = 0; i < key.secret.length(); i++) p[i] = 0;
+        key.secret = "";
+    }
+    keys.clear();
 }

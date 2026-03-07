@@ -11,7 +11,7 @@
 [![YouTube](https://img.shields.io/badge/YouTube-Demo-red?logo=youtube)](https://www.youtube.com/watch?v=YTVQBwgok_E)
 [![Hackster](https://img.shields.io/badge/Hackster.io-Featured-00979D?logo=hackster)](https://www.hackster.io/makepkg/securegen-open-source-totp-authenticator-password-manager-c350d6)
 [![Dev.to](https://img.shields.io/badge/Dev.to-Blog-0A0A0A?logo=dev.to)](https://dev.to/makepkg)
-[![Product Hunt](https://img.shields.io/badge/Product_Hunt-Launched-DA552F?logo=producthunt&logoColor=white)]([https://www.producthunt.com/posts/](https://www.producthunt.com/products/securegen-2)[)
+[![Product Hunt](https://img.shields.io/badge/Product_Hunt-Launched-DA552F?logo=producthunt&logoColor=white)](https://www.producthunt.com/products/securegen-2)
 
 [Video Demo](#-video-demo) • [Features](#-key-features) • [Installation](#-quick-start) • [Documentation](#-documentation) • [Security](#-security) • [Support](#-support)
 
@@ -21,7 +21,7 @@
 
 ## 📸 Device Gallery
 
-### Physical Device Interface
+### Physical Device
 <table>
   <tr>
     <td align="center" width="33%">
@@ -64,7 +64,7 @@
   <tr>
     <td align="center" width="33%">
       <img src="assets/screenshots/screenshots/web-dashboard.png" alt="Web Dashboard" width="100%"/>
-      <br/><b>Dashboard & Login</b>
+      <br/><b>Dashboard</b>
       <br/>Secure web access
     </td>
     <td align="center" width="33%">
@@ -105,454 +105,160 @@
 
 [![SecureGen Demo Video](https://img.youtube.com/vi/YTVQBwgok_E/maxresdefault.jpg)](https://www.youtube.com/watch?v=YTVQBwgok_E)
 
-**Watch the full demonstration** showing TOTP generation, password management, BLE keyboard typing, and web interface in action.
+**Watch the full demonstration** — TOTP generation, password management, BLE keyboard, and web interface.
 
-[▶️ Watch on YouTube](https://www.youtube.com/watch?v=YTVQBwgok_E) | Duration: 2 minutes
+[▶️ Watch on YouTube](https://www.youtube.com/watch?v=YTVQBwgok_E)
 
 </div>
 
 ---
 
-## 🔒 Security in Action
-
-### Network Traffic Protection Visualization
-
-SecureGen implements multiple security layers to protect web communications. Here's what that looks like in practice:
-
-<table>
-  <tr>
-    <td align="center" width="50%">
-      <img src="assets/security/before-protection.png" alt="Before Security Layers" width="100%"/>
-      <br/><b>Before: Readable HTTP Traffic</b>
-      <br/>All request details visible in plaintext
-    </td>
-    <td align="center" width="50%">
-      <img src="assets/security/after-protection.png" alt="After Security Layers" width="100%"/>
-      <br/><b>After: Protected Traffic</b>
-      <br/>Encrypted and obfuscated communications
-    </td>
-  </tr>
-</table>
-
-**What Changes:**
-- **Before:** API endpoints, session cookies, and request structure are fully visible to network monitoring tools
-- **After:** Multi-layer protection encrypts payload, obfuscates URLs, masks metadata, and prevents traffic analysis
-
-This demonstrates the **7-layer security architecture** protecting your sensitive data from passive monitoring, MITM attacks, and traffic pattern analysis.
-
-<details>
-<summary><b>🔍 Technical Details (Click to Expand)</b></summary>
-
-**Protection Layers:**
-
-1. **Key Exchange (ECDH)** - Establishes secure session keys using elliptic curve cryptography
-2. **Session Encryption** - Unique encryption for each communication session
-3. **URL Obfuscation** - Dynamic API endpoints generated using cryptographic hashing
-4. **Header Obfuscation** - HTTP headers dynamically mapped to hide metadata
-5. **Decoy Injection** - Fake headers added to confuse traffic analysis
-6. **Method Tunneling** - HTTP methods hidden to prevent fingerprinting
-7. **Timing Protection** - Random delays prevent timing-based side-channel attacks
-
-**Security Benefits:**
-- Protects against passive network monitoring (Wireshark, packet sniffing)
-- Prevents traffic pattern analysis and metadata leakage
-- Resists MITM attacks through session-based encryption
-- Anti-fingerprinting measures prevent device identification
-
-**Performance Impact:**
-- ~50ms overhead per request
-- Minimal impact on user experience
-- Worth the trade-off for security-critical applications
-
-**Implementation:**
-- Built with mbedTLS for cryptographic primitives
-- Custom session management layer
-- Hardware-accelerated encryption on ESP32
-- All code available in the repository for audit
-
-</details>
-
-**Read more:** [Security Architecture Documentation](docs/security/SECURITY_OVERVIEW.md)
-
----
-
 ## ✨ Key Features
 
-### 🔐 Security First
-- **Military-Grade Encryption** - AES-256 for all sensitive data
-- **Multi-Layer Protection** - 7+ security layers for web communications
-- **Hardware Security** - Unique device keys from hardware entropy
-- **PIN Protection** - Secure device startup and BLE transmission
-- **Encrypted BLE** - Authenticated Bluetooth with bonding and MITM protection
+### 🔐 TOTP / HOTP Authenticator
+- Compatible with Google Authenticator, Microsoft Authenticator, Authy, and all RFC 6238 / RFC 4226 services
+- SHA1 / SHA256 / SHA512, 6 and 8 digit codes, 30s and 60s periods
+- HOTP counter-based codes with automatic counter increment
+- Add keys via QR code scan (camera or file), manual entry, or bulk import
+- Export any key as QR code — displayed on the device screen and in the web interface
+- Encrypted storage with unique per-device key
 
-### 🎯 Dual Functionality
-- **TOTP Authenticator** - Compatible with Google Authenticator, Authy, and all standard 2FA services
-- **Password Manager** - Secure offline vault with BLE keyboard transmission
-- **Air-Gapped Operation** - Works completely offline for maximum security
-- **Wireless Transmission** - Send passwords via encrypted Bluetooth to any device
+### 🔑 Password Manager
+- Offline encrypted vault — works without any network connection
+- BLE HID keyboard: types passwords directly into any device, no clipboard
+- PIN protection for BLE transmission
+- Encrypted export/import for backup and migration
 
-### 🌐 Advanced Web Interface
-- **Full Management** - Add, edit, delete TOTP codes and passwords remotely
-- **QR Code Scanning** - Easy TOTP setup via camera or file upload
-- **Password Generator** - Advanced generation with customizable complexity
-- **Import/Export** - Encrypted backup with password protection
-- **Custom Themes** - Light and Dark modes with custom splash screens
-- **Session Security** - Automatic timeouts and secure authentication
+### 🌐 Web Management Interface
+- Runs on the device itself — no cloud, no external servers
+- Full TOTP and password management from any browser
+- Password generator with complexity settings
+- Three network modes: WiFi client, AP hotspot, or fully offline
 
-### ⚡ Power Efficient
-- **Smart WiFi** - Only active for time sync and web server
-- **Light Sleep Mode** - Automatic power saving after 30 seconds
-- **Battery Monitoring** - Real-time voltage and percentage display
-- **Optimized Display** - Intelligent brightness control for battery life
+### 🎨 Display & Themes
+- Light and dark themes, switchable from the web interface
+- Custom splash screens on boot
+- Battery indicator and WiFi status always visible
 
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-- [PlatformIO IDE](https://platformio.org/platformio-ide) (VS Code extension recommended)
-- LILYGO® TTGO T-Display ESP32 board
-- USB-C cable for programming
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/Unix-like-SoN/SecureGen.git
-   cd SecureGen
-   ```
-
-2. **Open in PlatformIO**
-   - Launch VS Code with PlatformIO extension
-   - Click "Open Project" and select the cloned folder
-
-3. **Build and Upload**
-   - Connect your T-Display board via USB
-   - Click "Upload" in PlatformIO toolbar (or press `Ctrl+Alt+U`)
-
-### First Boot Setup
-
-1. **WiFi Configuration**
-   - Device creates AP: `ESP32-TOTP-Setup`
-   - Connect and navigate to `192.168.4.1`
-   - Enter your WiFi credentials
-
-2. **Security Setup**
-   - Create administrator password for web interface
-   - Set optional PIN code for device startup
-   - Configure BLE security settings
-
-3. **Time Synchronization**
-   - Device automatically syncs time via NTP
-   - Required for accurate TOTP generation
-
-4. **Ready to Use!**
-   - Device switches to normal operation
-   - Access web interface at device IP address
-
----
-
-## 🎮 Device Controls
-
-### Button Operations
-
-| Button | Action | Function |
-|--------|--------|----------|
-| **Button 1** (Top) | Short Press | Navigate to previous item |
-| | Long Press (5s) | Switch TOTP ↔ Password Manager mode |
-| **Button 2** (Bottom) | Short Press | Navigate to next item |
-| | Long Press (5s) | Power off (deep sleep) |
-| **Both Buttons** | 2 seconds (Password Mode) | Activate BLE keyboard transmission |
-| | 5 seconds (on boot) | Factory reset (wipe all data) |
-
-### Wake from Sleep
-- After 30 seconds of inactivity, device enters light sleep
-- **Press Button 2** to wake the device
-- Note: Button 1 cannot wake device due to hardware limitation
-
----
-
-## 🔧 Operating Modes
-
-### Device Modes
-
-#### 1. TOTP Authenticator Mode
-- Displays service name, 6-digit code, and countdown timer
-- Compatible with all standard 2FA services
-- Encrypted storage with unique device key
-- Real-time code generation with visual progress indicator
-
-#### 2. Password Manager Mode
-- Secure offline password vault
-- Optional password masking for privacy
-- BLE keyboard transmission to any device
-- Advanced password generation tools
-- Batch operations and secure backup
-
-### Network Modes
-
-#### 3. Offline Mode (Air-Gapped)
-- Complete offline operation
-- Maximum security through network isolation
-- Password Manager works independently
-- Optimized battery life with WiFi disabled
-
-#### 4. Access Point (AP) Mode
-- Device creates own WiFi hotspot
-- Web interface for configuration
-- Isolated network environment
-- Secure password access
-
-#### 5. WiFi Client Mode (Self-Hosted)
-- Connects to existing network
-- Always-on server application
-- Accessible to trusted devices
-- Perfect for home/team deployment
-- Functions like Bitwarden or KeeWeb with dedicated hardware
-
-#### 6. BLE Security Mode
-- PIN authentication on connecting device
-- Encrypted transmission with MITM protection
-- Device bonding for trusted connections
-- Automatic timeout after transmission
+### ⚡ Hardware
+- LILYGO® TTGO T-Display ESP32 — dual-core 240MHz, 1.14" TFT display
+- Battery monitoring with real-time voltage and percentage
+- Deep sleep and light sleep power saving
 
 ---
 
 ## 🛡️ Security
 
-### Multi-Layer Protection System
+All sensitive data is encrypted with AES-256 using a unique per-device key derived from your PIN via PBKDF2-HMAC-SHA256. The web interface runs over an HTTPS-like encrypted channel (ECDH P-256 key exchange + AES-256-GCM) — works even in AP mode without certificates.
 
-This device implements **7+ layers of security** for protecting your sensitive data:
+**8 layers of web protection:** key exchange → session encryption → URL obfuscation → header obfuscation → decoy traffic → method tunneling → timing protection → honeypot endpoints.
 
-**Layer 1: Key Exchange**
-- Elliptic Curve Diffie-Hellman (ECDH) with P-256 curve
-- Establishes secure session keys
-- Forward secrecy protection
+**Device security:** PIN with persistent lockout (5 attempts across reboots), secure memory wipe before deep sleep, encrypted BLE pairing.
 
-**Layer 2: Data Encryption**
-- Session-based encryption for all communications
-- Unique encryption per message
-- Replay protection with message counters
+### Known Limitations
+- PBKDF2 iteration count (25,000) is below OWASP 2023 recommendations due to ESP32 hardware constraints
+- No hardware secure enclave or secure boot by default
+- Active MITM on initial ECDH exchange is not detectable without a server certificate
 
-**Layer 3: URL Obfuscation**
-- Dynamic API endpoint paths
-- SHA-256 based generation
-- Rotates on device reboot
-
-**Layer 4: Header Obfuscation**
-- Dynamic HTTP header mapping
-- Hides sensitive metadata
-- Regenerated on each boot
-
-**Layer 5: Fake Header Injection**
-- Adds decoy headers to confuse traffic analysis
-- Mimics browser behavior
-- Random values per request
-
-**Layer 6: Method Tunneling**
-- HTTP method obfuscation
-- All requests appear as POST
-- Additional protocol-level protection
-
-**Layer 7: Anti-Timing Analysis**
-- Random delays in cryptographic operations
-- Prevents timing-based attacks
-- Masks operation patterns
-
-**Plus:** CSRF protection, session management, rate limiting, and more.
-
-### Data Protection
-
-**Encryption at Rest:**
-- AES-256 encryption for all sensitive data
-- Unique device keys from hardware parameters
-- Hardware-accelerated cryptography
-- Secure key derivation (PBKDF2-HMAC-SHA256)
-
-**Physical Security:**
-- PIN protection for device startup (4-10 digits)
-- Secure boot support
-- Factory reset with secure data wiping
-- Memory protection against leakage
-
-**Bluetooth Security:**
-- LE Secure Connections with MITM protection
-- AES-128 encryption (BLE standard)
-- PIN-based pairing
-- Device bonding for trusted connections
-
-**For detailed security information:**
-- [Security Overview](docs/security/SECURITY_OVERVIEW.md) - Public security documentation
-- [Security Best Practices](#-security-best-practices) - User recommendations
+→ [Security Overview](docs/development/security/SECURITY_OVERVIEW.md) — full security summary  
+→ [Security Model](docs/development/security/security_model.md) — technical reference for developers and auditors
 
 ---
 
-## 📦 Hardware Requirements
+## 🎮 Device Controls
 
-### Primary Components
-- **Board:** [LILYGO® TTGO T-Display ESP32](https://www.lilygo.cc/products/t-display)
-- **Display:** 1.14" ST7789 TFT (135x240 pixels)
-- **Battery:** Li-Po battery with JST connector (recommended ≥500mAh)
-- **Connectivity:** WiFi 802.11 b/g/n + Bluetooth 5.0 LE
+| Button | Action | Function |
+|--------|--------|----------|
+| **Button 1** (Top) | Short press | Previous item |
+| | Long press 2s | Switch TOTP ↔ Password Manager |
+| **Button 2** (Bottom) | Short press | Next item |
+| | Long press 5s | Power off (deep sleep) |
+| **Both buttons** | 2s in Password Mode | Activate BLE keyboard |
+| | 5s on PIN screen | Shutdown |
+| | 5s on boot | Factory reset |
 
-### Technical Specifications
-- **Processor:** ESP32 dual-core Xtensa LX6 @ 240MHz
-- **RAM:** 520KB SRAM with intelligent memory management
-- **Storage:** 4MB Flash with wear-leveling filesystem
-- **Security:** Hardware-accelerated AES encryption
-- **Power:** Optimized for battery operation with multiple sleep modes
-- **Temperature:** -40°C to +85°C industrial grade
+Wake from sleep: press Button 2.
+
+---
+
+## 🚀 Quick Start
+
+### Requirements
+- [PlatformIO](https://platformio.org/platformio-ide) (VS Code extension)
+- LILYGO® TTGO T-Display ESP32
+- USB-C cable
+
+### Install
+
+```bash
+git clone https://github.com/makepkg/SecureGen.git
+cd SecureGen
+# Open in VS Code with PlatformIO, then Upload
+```
+
+### First Boot
+
+1. Device creates AP `ESP32-TOTP-Setup` → connect and open `192.168.4.1`
+2. Enter WiFi credentials
+3. Set administrator password and optional PIN
+4. Device syncs time via NTP and is ready
+
+→ [Complete User Manual](docs/user/GUIDE.html) for detailed setup and usage
 
 ---
 
 ## 📚 Documentation
 
-### User Guides
-- [Complete User Manual](docs/README.md) - Comprehensive usage guide
-- [Security Overview](docs/security/SECURITY_OVERVIEW.md) - Security features and best practices
-- [Feature Documentation](docs/features/) - Detailed feature descriptions
-- [Troubleshooting Guide](docs/fixes/) - Common issues and solutions
-
-### Developer Resources
-- [Development Guide](docs/development/) - Build and development instructions
-- [Security Architecture](docs/security/) - Security implementation details
-
-### Recent Updates
-- [Battery Power Stability Fix](docs/fixes/battery-reboot-fix-ru.md) - PIN entry optimization
-- [Display Initialization Fix](docs/fixes/) - Screen initialization improvements
+| Document | Audience |
+|----------|----------|
+| [User Manual](docs/user/GUIDE.html) | All users — setup, operation, features |
+| [Operating Modes](docs/user/MODES.md) | Network and display mode reference |
+| [Decrypt Export Tool](docs/user/decrypt-export-guide.md) | Offline backup decryption |
+| [Security Overview](docs/development/security/SECURITY_OVERVIEW.md) | Security summary |
+| [Security Model](docs/development/security/security_model.md) | Full technical security reference |
+| [API Endpoints](docs/development/ENDPOINTS.md) | Developer API reference |
+| [System Design](docs/development/system_design.md) | Architecture and boot sequence |
+| [Logging System](docs/development/LOGGING_SYSTEM.md) | Debug and log configuration |
 
 ---
 
-## 🔐 Security Best Practices
+## 🗺️ Roadmap
 
-### Recommended Security Measures
-
-**Network Security**
-- Use strong WiFi passwords (WPA3 if available)
-- Consider network isolation for the device
-- Regularly update firmware through web interface
-- Monitor access logs for suspicious activity
-
-**Physical Security**
-- Keep device physically secure when not in use
-- Enable PIN protection for startup
-- Use factory reset if device is compromised
-- Store backup files in encrypted storage
-
-**Data Management**
-- Regularly export encrypted backups
-- Use strong administrator passwords
-- Change PIN codes periodically
-- Log out from web sessions when finished
-
-**BLE Security**
-- Only pair with trusted devices
-- Remove old bonded devices periodically
-- Use PIN protection for BLE transmission
-- Monitor BLE connection status
+- Quick search by account name, favorites / pinned accounts, grouping by tags (work, personal, finance)
+- RTC module support for offline timekeeping without NTP
+- Project website + web-based flasher + online editor
+- Multilingual support (English, Russian, Ukrainian, Chinese, German)
+- Adapt firmware for other ESP32 boards
+- Informative setting flags in web cabinet
+- Flash encryption and secure boot (optional hardening)
+- Boot mode selection improvements — configurable default startup mode
 
 ---
 
-## 🌐 Community & Resources
+## 🤝 Support & Community
 
-### Stay Connected
-
-- **📺 YouTube**: [Demo Videos & Tutorials](https://www.youtube.com/watch?v=YTVQBwgok_E)
-- **📝 Dev.to**: [Technical Articles](https://dev.to/makepkg)
-- **🐦 Twitter/X**: [@makepkg](https://x.com/makepkg_)
-
-### Featured On
-
-- 🏆 Product Hunt - [Launch Page](https://www.producthunt.com/products/securegen-2)
-- 📰 Hackster.io - [Featured Project](https://www.hackster.io/makepkg/securegen-open-source-totp-authenticator-password-manager-c350d6)
-- ✍️ Dev.to - [Technical Series](https://dev.to/makepkg)
-
-### Share Your Build
-
-Built your own SecureGen? We'd love to see it!
-- Tag us on social media
-- Submit to [Discussions](https://github.com/makepkg/SecureGen/discussions)
-- Share photos in the community
-
----
-
-## 🤝 Support
-
-### Get Help
 - **Issues:** [GitHub Issues](https://github.com/makepkg/SecureGen/issues)
 - **Discussions:** [GitHub Discussions](https://github.com/makepkg/SecureGen/discussions)
-- **Documentation:** [Project Wiki](docs/)
+- **YouTube:** [Demo & Tutorials](https://www.youtube.com/watch?v=YTVQBwgok_E)
+- **Dev.to:** [Technical Articles](https://dev.to/makepkg)
+- **Twitter/X:** [@makepkg](https://x.com/makepkg_)
+- **Hackster.io:** [Featured Project](https://www.hackster.io/makepkg/securegen-open-source-totp-authenticator-password-manager-c350d6)
+- **Product Hunt:** [Launch Page](https://www.producthunt.com/products/securegen-2)
 
-### Contributing
-Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting pull requests.
-
-### Sponsorship & Donations
-
-If you like this project and want to support its development, you can do so in the following ways:
-
-**GitHub Sponsors:**
+### Donations
 
 [![Sponsor](https://img.shields.io/badge/Sponsor-❤-red.svg)](https://github.com/sponsors/makepkg)
 
-**Cryptocurrency Donations:**
+**USDT BEP-20:** `0x4f85f29892b261fa8029f3cfd64211e166744733`  
+**USDT TRC-20:** `TDnjDg9HxySo1J2FPSrvWQejyZ4gHKiXSJ`
 
-- **TetherUSD (USDT) BEP-20** (Binance Smart Chain):
-  ```
-  0x4f85f29892b261fa8029f3cfd64211e166744733
-  ```
-
-- **TetherUSD (USDT) TRC-20** (Tron):
-  ```
-  TDnjDg9HxySo1J2FPSrvWQejyZ4gHKiXSJ
-  ```
-
-Your support is very important and helps continue working on open-source projects!
-
-**⭐ Star this repository if you find it useful!**
-
-For more ways to support, see [SUPPORT.md](SUPPORT.md).
+**⭐ Star this repo if you find it useful!**
 
 ---
 
 ## 📄 License
 
-This project is licensed under the **MIT License**.
-
-### What This Means
-
-✅ **You can:**
-- Use this software for personal or commercial purposes
-- Modify the source code
-- Distribute copies
-- Sublicense the software
-- Use it privately
-
-⚠️ **You must:**
-- Include the original copyright notice
-- Include the MIT License text
-
-❌ **You cannot:**
-- Hold the author liable for any damages
-- Use the author's name for endorsement without permission
-
-For full license text, see the [LICENSE](LICENSE) file.
-
-### Third-Party Licenses
-
-This project uses the following open-source libraries:
-- **TFT_eSPI** - FreeBSD License
-- **ESPAsyncWebServer** - LGPL-3.0 License
-- **AsyncTCP** - LGPL-3.0 License
-- **ArduinoJson** - MIT License
-- **mbedTLS** - Apache 2.0 License (included in ESP-IDF)
-
----
-
-## 🙏 Acknowledgments
-
-- ESP32 community for excellent libraries and support
-- LILYGO for the T-Display hardware platform
-- All contributors and users of this project
+MIT — see [LICENSE](LICENSE). Third-party: TFT_eSPI (FreeBSD), ESPAsyncWebServer (LGPL-3.0), AsyncTCP (LGPL-3.0), ArduinoJson (MIT), mbedTLS (Apache 2.0).
 
 ---
 

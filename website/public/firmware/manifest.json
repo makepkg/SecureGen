@@ -1,0 +1,15 @@
+{
+  "name": "SecureGen",
+  "version": "v2.0.0",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        { "path": "/SecureGen/firmware/bootloader.bin", "offset": 4096 },
+        { "path": "/SecureGen/firmware/partitions.bin", "offset": 32768 },
+        { "path": "/SecureGen/firmware/firmware.bin",   "offset": 65536 }
+      ]
+    }
+  ]
+}

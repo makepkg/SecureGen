@@ -170,9 +170,19 @@ void WifiManager::startConfigPortal() {
     bool apStarted = WiFi.softAP(ap_ssid);
     if (apStarted) {
         LOG_INFO("WifiManager", "Access point started successfully");
+        WiFi.scanNetworks(true); // async, не блокирует
+        // DNS НЕ стартуем здесь
     } else {
         LOG_ERROR("WifiManager", "Failed to start access point");
     }
+}
+
+void WifiManager::startDns() {
+    _dnsServer.start(53, "*", WiFi.softAPIP());
+}
+
+void WifiManager::processDnsRequests() {
+    _dnsServer.processNextRequest();
 }
 
 String WifiManager::getIP() {

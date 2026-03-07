@@ -81,7 +81,7 @@ void TrafficObfuscationManager::generateDecoyTraffic() {
     // Генерируем 2-4 случайных decoy запроса
     int requestCount = 2 + (esp_random() % 3);
     
-    LOG_DEBUG("TrafficObfuscation", "🎭 Generating " + String(requestCount) + " decoy requests...");
+    // Убрали DEBUG лог - оставляем только итоговый INFO
     
     int successCount = 0;
     for (int i = 0; i < requestCount; i++) {
@@ -169,8 +169,7 @@ bool TrafficObfuscationManager::sendDecoyHttpRequest(const String& endpoint, con
         
         if (sent) {
             totalDecoyRequests++;
-            LOG_DEBUG("TrafficObfuscation", "📤 Decoy " + method + " " + endpoint + " → " + 
-                     String(fakeIP[0]) + "." + String(fakeIP[1]) + "." + String(fakeIP[2]) + "." + String(fakeIP[3]) + ":80");
+            // Убрали DEBUG лог с IP адресами - оставляем только итоговый счетчик
             return true;
         }
     }

@@ -211,15 +211,14 @@ const char page_register[] PROGMEM = R"rawliteral(
 
         // 🔗 Загрузка URL obfuscation mappings
         window.urlObfuscationMap = {};
-        fetch('/api/url_obfuscation/mappings')
+        fetch('/api/client/config')
             .then(res => res.json())
-            .then(data => {
-                window.urlObfuscationMap = data;
-                console.log('🔗 Loaded URL obfuscation mappings for register page');
+            .then(cfg => {
+                if (cfg.k) window.urlObfuscationMap['/api/secure/keyexchange'] = cfg.k;
+                if (cfg.t) window.urlObfuscationMap['/api/tunnel'] = cfg.t;
+                if (cfg.l) window.urlObfuscationMap['/login'] = cfg.l;
             })
-            .catch(err => {
-                console.warn('⚠️ Failed to load URL mappings, using standard URLs:', err);
-            });
+            .catch(() => {});
 
         // Password visibility toggle function
         function togglePasswordVisibility(inputId, toggleElement) {

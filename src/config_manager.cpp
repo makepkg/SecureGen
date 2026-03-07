@@ -371,6 +371,36 @@ uint16_t ConfigManager::getDisplayTimeout() {
     return 30; // Default fallback
 }
 
+String ConfigManager::getTimezone() {
+    if (!LittleFS.exists(CONFIG_FILE)) return "UTC0";
+    fs::File configFile = LittleFS.open(CONFIG_FILE, "r");
+    if (!configFile) return "UTC0";
+    JsonDocument doc;
+    if (deserializeJson(doc, configFile) != DeserializationError::Ok) {
+        configFile.close();
+        return "UTC0";
+    }
+    configFile.close();
+    return doc["timezone"] | "UTC0";
+}
+
+bool ConfigManager::saveTimezone(const String& tz) {
+    JsonDocument doc;
+    if (LittleFS.exists(CONFIG_FILE)) {
+        fs::File configFile = LittleFS.open(CONFIG_FILE, "r");
+        if (configFile) {
+            deserializeJson(doc, configFile);
+            configFile.close();
+        }
+    }
+    doc["timezone"] = tz;
+    fs::File configFile = LittleFS.open(CONFIG_FILE, "w");
+    if (!configFile) return false;
+    serializeJson(doc, configFile);
+    configFile.close();
+    return true;
+}
+
 bool ConfigManager::saveDisplayTimeout(uint16_t timeout) {
     LOG_INFO("ConfigManager", "saveDisplayTimeout() called with value: " + String(timeout) + " seconds");
 

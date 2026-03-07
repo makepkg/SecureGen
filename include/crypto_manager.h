@@ -4,6 +4,8 @@
 #include <Arduino.h>
 #include <vector>
 #include "LittleFS.h"
+#include "mbedtls/entropy.h"
+#include "mbedtls/ctr_drbg.h"
 
 #define DEVICE_KEY_FILE "/device.key"
 
@@ -37,6 +39,9 @@ public:
     // Client ID generation for secure sessions
     String generateClientId(const String& fingerprint);
     
+    // Secure random number generation using mbedTLS CTR_DRBG
+    void secureRandom(uint8_t* buffer, size_t length);
+    
     // --- Persistent Session Management ---
     bool saveSession(const String& sessionId, const String& csrfToken, unsigned long createdTime);
     bool loadSession(String& sessionId, String& csrfToken, unsigned long& createdTime);
@@ -51,7 +56,44 @@ public:
     bool saveBlePin(uint32_t pin);
     uint32_t loadBlePin();
     bool isBlePinConfigured();
+    
+    // --- Device BLE PIN Management ---
+    bool saveDeviceBlePin(uint32_t pin);
+    uint32_t loadDeviceBlePin();
+    bool isDeviceBlePinConfigured();
+    bool isDeviceBlePinEnabled();
+    void setDeviceBlePinEnabled(bool enabled);
+    bool verifyDeviceBlePin(const String& pin); // Проверка Device BLE PIN
+    
     uint32_t generateSecurePin();
+
+    // --- NEW: PIN-based Device Key Encryption ---
+    // Проверяет существует ли device.key файл
+    bool isDeviceKeyFileExists();
+    
+    // Проверяет зашифрован ли device.key (flag=0x01)
+    bool isDeviceKeyEncrypted();
+    
+    // Создает новый device key и шифрует его PIN-кодом
+    bool createEncryptedDeviceKey(const String& pin);
+    
+    // Расшифровывает device key используя PIN
+    bool unlockDeviceKeyWithPin(const String& pin);
+    
+    // Проверяет инициализирован ли device key в памяти
+    bool isDeviceKeyInitialized() const { return _isKeyInitialized; }
+    
+    // Изменяет PIN (перешифровывает device key)
+    bool changePinEncryption(const String& oldPin, const String& newPin);
+    
+    // Отключает PIN защиту (сохраняет device key незашифрованным)
+    bool disablePinEncryption(const String& currentPin);
+    
+    // Включает PIN защиту (шифрует существующий device key)
+    bool enablePinEncryption(const String& newPin);
+    
+    // Wipe device key from memory
+    void wipeDeviceKey();
 
 private:
     CryptoManager(); // Private constructor
@@ -60,9 +102,19 @@ private:
 
     unsigned char _deviceKey[32]; // 256-bit AES key
     bool _isKeyInitialized;
+    mbedtls_entropy_context _entropy;
+    mbedtls_ctr_drbg_context _drbg;
+    bool _isDrbgInitialized;
 
     void generateAndSaveKey();
     void loadKey();
+    
+    // --- NEW: Internal PIN encryption helpers ---
+    bool encryptDeviceKeyWithPin(const String& pin);
+    bool decryptDeviceKeyWithPin(const String& pin);
+    void generateNewDeviceKey();
+    bool saveDeviceKeyEncrypted(const uint8_t* salt, const uint8_t* encryptedKey);
+    bool saveDeviceKeyUnencrypted();
 };
 
 #endif // CRYPTO_MANAGER_H

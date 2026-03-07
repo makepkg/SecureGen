@@ -1,45 +1,21 @@
-# 📚 Документация ESP32 T-Display TOTP
+# ESP32 T-Display TOTP — Documentation
 
-Организованная документация проекта с актуальной информацией.
+## Structure
 
-## 📁 Структура документации
+### security/
+- `SECURITY_OVERVIEW.md` — Public-facing security summary. Cryptographic standards, known limitations, threat model overview.
+- `security-model.md` — Developer/auditor reference. Full 8-layer architecture, key hierarchy, threat model tables, new endpoint checklist.
+- `pbkdf2-security.md` — PBKDF2 parameters, iteration counts, hardware constraints, compatibility notes for decrypt_export.html.
 
-### 🔐 [Security](security/) - Система безопасности
-- Многослойная защита API
-- HTTPS-like шифрование  
-- Обфускация и туннелирование
-- Актуальные реализации безопасности
+### development/
+- `api-endpoints.md` — Complete API reference. All endpoints with auth requirements, request/response formats, security notation.
+- `system-design.md` — Internal architecture. Boot sequence, PIN design, shutdown/deep sleep, data persistence table, error handling.
 
-### ⚡ [Features](features/) - Функциональность
-- AP и Offline режимы
-- Кеширование и оптимизация
-- UI/UX улучшения
-- Пользовательские функции
+### user/
+- `GUIDE.html` — Device operation manual.
+- `MODES.md` — Network and display modes, feature matrix, mode selection at startup.
+- `decrypt-export-guide.md` — Offline export decryption tool guide.
 
-### 🛠️ [Development](development/) - Разработка
-- Технические руководства
-- Интеграционные гайды
-- Best practices
-- Справочные материалы
+---
 
-### 🔧 [Fixes](fixes/) - Исправления и баги
-- Документированные исправления
-- Известные проблемы и решения
-- Патчи и обновления
-
-### 📦 [Archive](archive/) - Архив
-- Устаревшие документы
-- Исторические записи
-- Неактуальные реализации
-
-## 🎯 Принципы организации
-
-1. **Актуальность** - только текущие реализации
-2. **Структурированность** - логическое разделение по темам  
-3. **Емкость** - краткие и информативные документы
-4. **Точность** - проверенная информация без ошибок
-
-## 🔄 Последнее обновление
-
-Структура создана: 2025-10-06
-Все документы актуализированы и проверены на соответствие текущему коду.
+Last updated: March 2026

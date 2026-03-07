@@ -22,6 +22,8 @@
 #include "web_admin_manager.h"
 #include "app_modes.h" // Используем новый общий заголовок
 #include <esp_task_wdt.h>
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
 
 #ifdef SECURE_LAYER_ENABLED
 #include "secure_layer_manager.h"
@@ -32,7 +34,10 @@
 // Global flag for device restart
 bool shouldRestart = false;
 
-#define WDT_TIMEOUT 5
+// Global flag for PIN disable request (set by web server)
+bool shouldPromptPinDisable = false;
+
+#define WDT_TIMEOUT 10
 
 #ifndef LED_BUILTIN
 #define LED_BUILTIN 2
@@ -56,6 +61,40 @@ SecureLayerManager& secureLayerManager = SecureLayerManager::getInstance();
 TrafficObfuscationManager& trafficObfuscationManager = TrafficObfuscationManager::getInstance();
 #endif
 
+// Secure shutdown function - wipes sensitive data before deep sleep
+void secureShutdown() {
+    LOG_INFO("Main", "Secure shutdown: wiping sensitive data...");
+    CryptoManager::getInstance().wipeDeviceKey();
+    keyManager.wipeSecrets();
+    passwordManager.wipePasswords();
+    #ifdef SECURE_LAYER_ENABLED
+    secureLayerManager.wipeAllSessions();
+    #endif
+    delay(50);
+    LOG_INFO("Main", "Secure shutdown: entering deep sleep");
+}
+
+// PIN attempt counter persistence functions
+int loadPinAttempts() {
+    if (!LittleFS.exists(PIN_ATTEMPTS_FILE)) return 0;
+    fs::File f = LittleFS.open(PIN_ATTEMPTS_FILE, "r");
+    if (!f) return 0;
+    int count = f.parseInt();
+    f.close();
+    return count;
+}
+
+void savePinAttempts(int count) {
+    fs::File f = LittleFS.open(PIN_ATTEMPTS_FILE, "w");
+    if (!f) return;
+    f.print(count);
+    f.close();
+}
+
+void clearPinAttempts() {
+    LittleFS.remove(PIN_ATTEMPTS_FILE);
+}
+
 // Глобальные переменные состояния
 static AppMode currentMode = AppMode::TOTP;
 static int currentKeyIndex = 0;
@@ -71,11 +110,16 @@ bool isScreenOn = true;
 
 unsigned long bothButtonsPressStartTime = 0;
 bool bleActionTriggered = false;
+static bool hotpSavePending = false;
+static int hotpSaveIndex = -1;
 
 unsigned long lastBatteryCheckTime = 0;
 const int batteryCheckInterval = 1000;
 static int lastBatteryPercentage = -1;
 
+bool configPortalActive = false;
+DNSServer adminDnsServer;
+StartupMode selectedMode = StartupMode::WIFI_MODE; // Default
 
 unsigned long lastTotpUpdateTime = 0;
 const int totpUpdateInterval = 250;
@@ -153,9 +197,11 @@ void handleFactoryResetOnBoot() {
             LOG_INFO("Main", "Deleting files...");
             LittleFS.remove(KEYS_FILE);
             LittleFS.remove("/wifi_config.json");
+            LittleFS.remove("/wifi_config.json.enc");  // Зашифрованный WiFi файл
             // SPLASH_IMAGE_PATH removed - custom splash upload disabled for security
             LittleFS.remove("/splash_config.json");  // Splash mode config (reset to disabled)
             LittleFS.remove(PIN_FILE);
+            clearPinAttempts(); // Clear PIN attempt counter
             LittleFS.remove(CONFIG_FILE); // Resets display timeout to default (30s) + AP password to "12345678"
             LittleFS.remove(DEVICE_KEY_FILE);
             LittleFS.remove(PASSWORD_FILE);
@@ -242,6 +288,115 @@ void setup() {
 
     LOG_INFO("Main", "Initializing Crypto Manager...");
     CryptoManager::getInstance().begin();
+    
+    // --- НОВАЯ ЛОГИКА: Проверка и создание Device PIN ---
+    LOG_INFO("Main", "Checking device key status...");
+    
+    if (!CryptoManager::getInstance().isDeviceKeyFileExists()) {
+        // ПЕРВАЯ ЗАГРУЗКА: device.key не существует
+        LOG_INFO("Main", "First boot detected - no device.key file found");
+        
+        displayManager.init();
+        
+        // 0. Показываем приветственный экран
+        displayManager.showMessage("First Boot!", 10, 20, false, 2);
+        displayManager.showMessage("PIN Setup Required", 10, 50, false, 2);
+        delay(2000);
+        
+        // 1. Выбираем длину PIN
+        int pinLength = pinManager.requestPinLengthSelection();
+        LOG_INFO("Main", "PIN length selected: " + String(pinLength));
+        
+        // 🔋 Сохраняем конфигурацию ПОСЛЕ отпускания кнопки для стабилизации питания
+        // Это предотвращает brownout reset на батарее при холодном старте
+        pinManager.setPinLength(pinLength);
+        delay(50); // Дополнительная задержка для стабилизации питания
+        pinManager.saveConfig();
+        LOG_INFO("Main", "PIN length configuration saved");
+        
+        // 2. Создаем PIN
+        bool pinCreated = false;
+        while (!pinCreated) {
+            pinCreated = pinManager.requestNewPinSetup();
+            if (!pinCreated) {
+                displayManager.init();
+                displayManager.showMessage("PIN Required!", 10, 30, true, 2);
+                displayManager.showMessage("Device cannot start", 10, 60, false, 1);
+                displayManager.showMessage("without PIN", 10, 75, false, 1);
+                delay(2000);
+            }
+        }
+        
+        LOG_INFO("Main", "First boot PIN setup completed successfully");
+        
+    } else if (CryptoManager::getInstance().isDeviceKeyEncrypted()) {
+        // ОБЫЧНАЯ ЗАГРУЗКА: device.key зашифрован, требуется PIN
+        LOG_INFO("Main", "Encrypted device key detected - PIN required");
+        
+        displayManager.init();
+        
+        bool unlocked = false;
+        const int maxAttempts = 5; // Максимум попыток перед блокировкой
+        int attempts = loadPinAttempts();
+        
+        if (attempts >= maxAttempts) {
+            LOG_CRITICAL("Main", "Device locked - max PIN attempts already reached.");
+            displayManager.init();
+            displayManager.showMessage("DEVICE LOCKED!", 10, 30, true, 2);
+            displayManager.showMessage("Too many attempts", 10, 60, false, 1);
+            displayManager.showMessage("Factory reset required", 10, 75, false, 1);
+            delay(5000);
+            secureShutdown();
+            esp_deep_sleep_start(); // Блокируем устройство
+        }
+        
+        while (!unlocked && attempts < maxAttempts) {
+            unlocked = pinManager.requestDevicePin();
+            
+            if (!unlocked) {
+                attempts++;
+                savePinAttempts(attempts);
+                LOG_WARNING("Main", "Failed PIN attempt " + String(attempts) + "/" + String(maxAttempts));
+                
+                if (attempts >= maxAttempts) {
+                    LOG_CRITICAL("Main", "Maximum PIN attempts exceeded! Device locked.");
+                    displayManager.init();
+                    displayManager.showMessage("DEVICE LOCKED!", 10, 30, true, 2);
+                    displayManager.showMessage("Too many attempts", 10, 60, false, 1);
+                    displayManager.showMessage("Factory reset required", 10, 75, false, 1);
+                    delay(5000);
+                    secureShutdown();
+                    esp_deep_sleep_start(); // Блокируем устройство
+                }
+                
+                displayManager.init();
+                displayManager.showMessage("Wrong PIN!", 10, 30, true, 2);
+                displayManager.showMessage("Attempt " + String(attempts) + "/" + String(maxAttempts), 10, 60, false, 2);
+                delay(1500);
+            }
+        }
+        
+        // PIN correct — clear counter
+        clearPinAttempts();
+        LOG_INFO("Main", "Device unlocked successfully with PIN");
+        
+    } else {
+        // LEGACY: device.key существует но не зашифрован (старый формат)
+        LOG_WARNING("Main", "Unencrypted device key detected (legacy format)");
+        LOG_INFO("Main", "Loading unencrypted key for backward compatibility");
+        
+        // Загружаем незашифрованный ключ
+        if (!CryptoManager::getInstance().unlockDeviceKeyWithPin("")) {
+            LOG_ERROR("Main", "Failed to load legacy unencrypted key");
+            displayManager.init();
+            displayManager.showMessage("KEY ERROR!", 10, 30, true, 2);
+            displayManager.showMessage("Cannot load device key", 10, 60, false, 1);
+            delay(3000);
+            ESP.restart();
+        }
+        
+        LOG_INFO("Main", "Legacy key loaded. Consider enabling PIN protection in web cabinet.");
+    }
 
 #ifdef SECURE_LAYER_ENABLED
     LOG_INFO("Main", "Initializing Secure Layer Manager...");
@@ -293,28 +448,14 @@ void setup() {
     LOG_INFO("Main", "Displaying splash screen...");
     splashManager.displaySplashScreen();
     
-    // 🔧 Полная инициализация display после splash (перед PIN проверкой)
+    // 🔧 Полная инициализация display после splash
     displayManager.init();
-    
-    LOG_INFO("Main", "Checking device startup PIN...");
-    if (pinManager.isPinEnabledForDevice() && pinManager.isPinSet()) {
-        LOG_INFO("Main", "Device PIN enabled, requesting PIN...");
-        while (!pinManager.requestPin()) {
-            LOG_WARNING("Main", "PIN access denied. Retrying...");
-            delay(1000);
-        }
-        LOG_INFO("Main", "Device PIN access granted. Continuing startup...");
-        // Переинициализируем дисплей после PIN проверки
-        displayManager.init();
-    } else {
-            LOG_INFO("Main", "Device PIN disabled or not set. Continuing startup...");
-    }
     
     displayManager.updateMessage("Initializing...", 10, 10, 2);
     
     // 🌌 ПРОМПТИНГ ВЫБОРА РЕЖИМА (AP/Offline/WiFi)
     LOG_INFO("Main", "Prompting for startup mode...");
-    StartupMode selectedMode = displayManager.promptModeSelection();
+    selectedMode = displayManager.promptModeSelection();
     
     // Переменная для отслеживания синхронизации времени
     struct tm timeinfo;
@@ -335,6 +476,9 @@ void setup() {
         WiFi.mode(WIFI_AP);
         WiFi.softAP(apName.c_str(), apPassword.c_str());
         
+        adminDnsServer.start(53, "*", WiFi.softAPIP());
+        LOG_INFO("Main", "DNS Server started for Admin AP");
+        
         // Запуск mDNS для AP режима
         String hostname = configManager.loadMdnsHostname();
         if (MDNS.begin(hostname.c_str())) {
@@ -346,20 +490,147 @@ void setup() {
         
         // Отображение информации на экране
         displayManager.init();
-        displayManager.showMessage("AP Mode Active", 10, 20, false, 2);
-        displayManager.showMessage("Network: " + apName, 10, 40, false, 1);
-        displayManager.showMessage("Password: " + apPassword, 10, 55, false, 1);
-        displayManager.showMessage("IP: " + WiFi.softAPIP().toString(), 10, 70, false, 1);
-        displayManager.showMessage("Domain: " + hostname + ".local", 10, 85, false, 1);
-        displayManager.showMessage("Connect to network", 10, 100, false, 1);
-        displayManager.showMessage("for web access", 10, 115, false, 1);
+        
+        auto drawApInfoScreen = [&]() {
+            TFT_eSPI* tft = displayManager.getTft();
+            auto* t = displayManager.getCurrentThemeColors();
+            int W = tft->width();   // 240
+            int H = tft->height();  // 135
+            int cx = W / 2;
+            
+            tft->fillScreen(t->background_dark);
+            tft->setTextDatum(MC_DATUM);
+            
+            // Title
+            tft->setTextSize(2);
+            tft->setTextColor(t->accent_primary, t->background_dark);
+            tft->drawString("AP Mode", cx, 18);
+            
+            // Divider line
+            tft->drawFastHLine(20, 32, W - 40, t->text_secondary);
+            
+            // Network name (large, prominent)
+            tft->setTextSize(1);
+            tft->setTextColor(t->text_secondary, t->background_dark);
+            tft->drawString("Network", cx, 44);
+            tft->setTextSize(1);
+            tft->setTextColor(t->text_primary, t->background_dark);
+            tft->drawString(apName, cx, 56);
+            
+            // Password and IP on same row area
+            tft->setTextColor(t->text_secondary, t->background_dark);
+            tft->drawString("Password: " + apPassword + "   IP: " + WiFi.softAPIP().toString(), cx, 70);
+            
+            // Button hints — match PIN screen bottom button style
+            // BTN1 hint (left side, like AP button in mode selection)
+            tft->fillRoundRect(8, H - 52, 106, 22, 6, t->background_light);
+            tft->setTextColor(t->text_primary, t->background_light);
+            tft->drawString("BTN1: WiFi QR", 8 + 53, H - 41);
+            
+            // BTN2 hint (right side, like Offline button in mode selection)
+            tft->fillRoundRect(126, H - 52, 106, 22, 6, t->accent_primary);
+            tft->setTextColor(t->background_dark, t->accent_primary);
+            tft->drawString("BTN2: Continue", 126 + 53, H - 41);
+        };
+        
+        drawApInfoScreen();
+        
+        auto highlightButton = [&](int activeBtn) {
+            TFT_eSPI* tft = displayManager.getTft();
+            auto* t = displayManager.getCurrentThemeColors();
+            int H = tft->height();
+            // BTN1
+            if (activeBtn == 1) {
+                tft->fillRoundRect(8, H - 52, 106, 22, 6, t->accent_primary);
+                tft->setTextDatum(MC_DATUM);
+                tft->setTextColor(t->background_dark, t->accent_primary);
+                tft->drawString("BTN1: WiFi QR", 8 + 53, H - 41);
+                tft->fillRoundRect(126, H - 52, 106, 22, 6, t->background_light);
+                tft->setTextColor(t->text_primary, t->background_light);
+                tft->drawString("BTN2: Continue", 126 + 53, H - 41);
+            } else {
+                tft->fillRoundRect(8, H - 52, 106, 22, 6, t->background_light);
+                tft->setTextDatum(MC_DATUM);
+                tft->setTextColor(t->text_primary, t->background_light);
+                tft->drawString("BTN1: WiFi QR", 8 + 53, H - 41);
+                tft->fillRoundRect(126, H - 52, 106, 22, 6, t->accent_primary);
+                tft->setTextColor(t->background_dark, t->accent_primary);
+                tft->drawString("BTN2: Continue", 126 + 53, H - 41);
+            }
+        };
+        
+        unsigned long apScreenStart = millis();
+        const unsigned long AP_SCREEN_TIMEOUT = 30000;
+        bool inQrMode = false;
+        int lastSecond = 30;
+        unsigned long qrStartTime = 0;
+        int lastQrSecond = 30;
+        
+        while (millis() - apScreenStart < AP_SCREEN_TIMEOUT) {
+            esp_task_wdt_reset();
+            
+            int secondsLeft = (int)((AP_SCREEN_TIMEOUT - (millis() - apScreenStart)) / 1000) + 1;
+            
+            if (inQrMode) {
+                // Manually update QR timer without triggering status bar
+                unsigned long now = millis();
+                int qrSecondsLeft = (int)((30000 - (now - qrStartTime)) / 1000);
+                if (qrSecondsLeft >= 0 && qrSecondsLeft != lastQrSecond) {
+                    lastQrSecond = qrSecondsLeft;
+                    displayManager.updateQRTimer(qrSecondsLeft);
+                }
+                
+                if (digitalRead(BUTTON_1) == LOW || digitalRead(BUTTON_2) == LOW) {
+                    while (digitalRead(BUTTON_1) == LOW || digitalRead(BUTTON_2) == LOW) {
+                        esp_task_wdt_reset(); delay(10);
+                    }
+                    displayManager.hideQRCode();
+                    inQrMode = false;
+                    lastSecond = -1;
+                    drawApInfoScreen();
+                }
+                delay(50);
+                continue;
+            }
+            
+            if (secondsLeft != lastSecond) {
+                lastSecond = secondsLeft;
+                TFT_eSPI* tft = displayManager.getTft();
+                tft->setTextDatum(MC_DATUM);
+                tft->setTextSize(1);
+                tft->setTextColor(secondsLeft <= 5 ? TFT_RED : TFT_YELLOW, TFT_BLACK);
+                tft->fillRect(0, 116, tft->width(), 14, TFT_BLACK);
+                tft->drawString("Auto: " + String(secondsLeft) + "s", tft->width() / 2, 122);
+            }
+            
+            if (digitalRead(BUTTON_1) == LOW) {
+                highlightButton(1);
+                while (digitalRead(BUTTON_1) == LOW) { esp_task_wdt_reset(); delay(10); }
+                delay(30); esp_task_wdt_reset();
+                String wifiQR = "WIFI:S:" + apName + ";T:WPA;P:" + apPassword + ";H:false;;";
+                LOG_INFO("Main", "WiFi QR: " + wifiQR);
+                displayManager.showQRCode(wifiQR, 30);
+                qrStartTime = millis();
+                lastQrSecond = 30;
+                inQrMode = true;
+                continue;
+            }
+            
+            if (digitalRead(BUTTON_2) == LOW) {
+                highlightButton(2);
+                while (digitalRead(BUTTON_2) == LOW) { esp_task_wdt_reset(); delay(10); }
+                delay(30); esp_task_wdt_reset();
+                break;
+            }
+            
+            delay(50);
+        }
         
         // Автозапуск веб-сервера в AP режиме
-        delay(3000);
         LOG_INFO("Main", "Auto-starting Web Server in AP Mode...");
         webServerManager.start();
         
-        // Очистка экрана
+        if (displayManager.isQRCodeActive()) displayManager.hideQRCode();
         displayManager.clearMessageArea(0, 0, 240, 135);
         
         // ❗ ПРОПУСКАЕМ WiFi подключение и синхронизацию времени
@@ -403,24 +674,27 @@ void setup() {
             wifiManager.startConfigPortal();
             webServerManager.startConfigServer();
             
-            // ⚠️ Config portal - это setup режим, который может работать долго
-            LOG_INFO("Main", "Config portal active. Connect to ESP32-TOTP-Setup to configure WiFi.");
-            LOG_INFO("Main", "Note: Keeping system alive for async web server.");
+            delay(500); // ждём стабилизации async_tcp
             
-            // Бесконечный цикл для Config Portal
-            while(1) {
-                yield(); // Позволяем async tasks работать
-                delay(100); // Короткая задержка для экономии CPU
-                vTaskDelay(1); // Дополнительный yield для FreeRTOS
+            esp_task_wdt_delete(NULL);
+            TaskHandle_t asyncTcpTask = xTaskGetHandle("async_tcp");
+            if (asyncTcpTask != NULL) {
+                esp_task_wdt_delete(asyncTcpTask);
             }
+            esp_task_wdt_deinit();
+            
+            wifiManager.startDns(); // только после отключения WDT
+            
+            configPortalActive = true;
+            return; // передаём управление loop()
         }
         LOG_INFO("Main", "WiFi Connected! IP: " + wifiManager.getIP());
 
         // 🕗 Time Sync (только для WiFi Mode)
         // 🌍 Используем разные NTP сервера для повышения надежности
         const char* ntpServers[] = {
+            "time.google.com",     // Google NTP (fast & reliable) - ПЕРВЫЙ
             "pool.ntp.org",        // Global NTP pool
-            "time.google.com",     // Google NTP (fast & reliable)
             "time.cloudflare.com"  // Cloudflare NTP (1.1.1.1)
         };
         
@@ -436,6 +710,9 @@ void setup() {
             // Даем время на отправку и обработку NTP запроса
             delay(800); // Увеличено с 500ms для стабильности
             
+            String savedTz = configManager.getTimezone();
+            setenv("TZ", savedTz.c_str(), 1);
+            tzset();
             if (getLocalTime(&timeinfo, 5000)) {
                 timeSynced = true;
                 LOG_INFO("Main", "Time Synced Successfully on attempt " + String(i+1) + " (" + String(ntpServers[i]) + ")!");
@@ -456,7 +733,7 @@ void setup() {
         if (!timeSynced) {
             // ⚠️ OFFLINE FALLBACK: Продолжаем работу без синхронизации времени
             // TOTP будет показывать "NOT SYNCED", но пароли и BLE работают нормально
-            LOG_WARNING("Main", "All 3 NTP servers failed (pool.ntp.org, time.google.com, time.cloudflare.com)");
+            LOG_WARNING("Main", "All 3 NTP servers failed (time.google.com, pool.ntp.org, time.cloudflare.com)");
             LOG_WARNING("Main", "Continuing in offline mode. TOTP: NOT SYNCED, Passwords: OK");
             
             displayManager.init();
@@ -542,8 +819,10 @@ void setup() {
 
 
 void handleButtons() {
+    esp_task_wdt_reset();
     static unsigned long button1PressStartTime = 0;
     static unsigned long button2PressStartTime = 0;
+    static bool suppressNextSinglePress = false;
     bool buttonPressed = false;
 
     bool button1_is_pressed = (digitalRead(BUTTON_1) == LOW);
@@ -554,6 +833,33 @@ void handleButtons() {
         // Если зажаты обе кнопки, сбрасываем таймеры одиночных нажатий, чтобы предотвратить конфликт
         button1PressStartTime = 0;
         button2PressStartTime = 0;
+
+        // HOTP generation: both buttons held 1 second in TOTP mode
+        if (currentMode == AppMode::TOTP) {
+            auto keys = keyManager.getAllKeys();
+            if (!keys.empty() && keys[currentKeyIndex].type == TOTPType::HOTP) {
+                if (bothButtonsPressStartTime == 0) {
+                    bothButtonsPressStartTime = millis();
+                }
+                unsigned long holdTime = millis() - bothButtonsPressStartTime;
+                
+                if (holdTime < 2000) {
+                    int progress = map(holdTime, 0, 2000, 0, 100);
+                    displayManager.drawHOTPLoader(progress);
+                    esp_task_wdt_reset();
+                }
+                if (holdTime >= 2000 && !bleActionTriggered) {
+                    bleActionTriggered = true;
+                    hotpSavePending = true;
+                    hotpSaveIndex = currentKeyIndex;
+                    // Nothing else — return immediately, main loop handles the rest
+                    return;
+                }
+                return; // return only for HOTP keys
+            }
+            // For non-HOTP keys in TOTP mode — fall through, no double-press action
+            return; // still prevent BLE activation in TOTP mode
+        }
 
         // Действие по двойному нажатию валидно только в режиме паролей
         if (currentMode == AppMode::PASSWORD && !passwordManager.getAllPasswords().empty()) {
@@ -584,10 +890,30 @@ void handleButtons() {
         // Если кнопки не зажаты вместе, сбрасываем таймер двойного нажатия
         if (bothButtonsPressStartTime > 0) {
             bothButtonsPressStartTime = 0;
+            suppressNextSinglePress = true;
             bleActionTriggered = false;
             previousPasswordIndex = -1;
-            displayManager.hideLoader();
+            
+            // Don't call hideLoader in TOTP mode - it clears the screen and wipes the code
+            if (currentMode != AppMode::TOTP) {
+                displayManager.hideLoader();
+            } else {
+                displayManager.eraseLoaderArea();
+                previousKeyIndex = -1; // force TOTP display redraw
+            }
+            
+            // Сбрасываем одиночные таймеры чтобы предотвратить ложные нажатия после двойного
+            button1PressStartTime = 0;
+            button2PressStartTime = 0;
         }
+    }
+
+    // Suppress single button processing until both buttons are fully released
+    if (suppressNextSinglePress) {
+        if (!button1_is_pressed && !button2_is_pressed) {
+            suppressNextSinglePress = false;
+        }
+        return;
     }
 
     // --- Логика одиночных нажатий (выполняется, только если не зажаты обе кнопки) ---
@@ -622,7 +948,7 @@ void handleButtons() {
         if (button1PressStartTime > 0) {
             displayManager.hideLoader();
             if (millis() - button1PressStartTime < powerOffHoldTime) {
-                LOG_DEBUG("Main", "Button 1 SHORT PRESS: Previous item");
+                LOG_DEBUG("Main", "Button 1 press: Previous item");
                 if (currentMode == AppMode::TOTP) {
                     auto keys = keyManager.getAllKeys();
                     if (!keys.empty()) {
@@ -652,6 +978,7 @@ void handleButtons() {
             displayManager.showMessage("Shutting down...", 10, 30, false, 2);
             delay(1000);
             displayManager.turnOff();
+            secureShutdown();
             esp_deep_sleep_start();
         } else {
             unsigned long holdTime = millis() - button2PressStartTime;
@@ -664,7 +991,7 @@ void handleButtons() {
         if (button2PressStartTime > 0) {
             displayManager.hideLoader();
             if (millis() - button2PressStartTime < powerOffHoldTime) {
-                LOG_DEBUG("Main", "Button 2 SHORT PRESS: Next item");
+                LOG_DEBUG("Main", "Button 2 press: Next item");
                 if (currentMode == AppMode::TOTP) {
                     auto keys = keyManager.getAllKeys();
                     if (!keys.empty()) {
@@ -710,6 +1037,14 @@ void checkScreenWakeup() {
         (button2PreviousState == HIGH && button2Current == LOW)) {
         
         lastActivityTime = millis();
+        
+        // If QR code active - dismiss it on any button press
+        if (displayManager.isQRCodeActive()) {
+            LOG_INFO("Main", "Button pressed - hiding QR code");
+            displayManager.hideQRCode();
+            return;
+        }
+        
         if (!isScreenOn) {
             LOG_DEBUG("Main", "Button press woke up screen in BLE mode");
             displayManager.turnOn();
@@ -722,6 +1057,12 @@ void checkScreenWakeup() {
 }
 
 void loop() {
+    if (configPortalActive) {
+        wifiManager.processDnsRequests();
+        delay(1);
+        return;
+    }
+    
     // Сброс Watchdog Timer в начале каждого цикла
     if (esp_task_wdt_reset() != ESP_OK) {
         LOG_ERROR("Main", "Failed to reset Watchdog Timer");
@@ -731,10 +1072,71 @@ void loop() {
     // Всегда проверяем включение экрана от кнопок
     checkScreenWakeup();
     
+    // НОВАЯ ЛОГИКА: Проверка флага отключения PIN (устанавливается веб-сервером)
+    if (shouldPromptPinDisable) {
+        shouldPromptPinDisable = false; // Сбрасываем сразу
+        
+        LOG_INFO("Main", "PIN disable request detected - prompting on device");
+        
+        // Включаем экран если он выключен
+        if (!isScreenOn) {
+            displayManager.turnOn();
+            isScreenOn = true;
+        }
+        
+        // Показываем сообщение
+        displayManager.init();
+        displayManager.showMessage("Web Request:", 10, 20, false, 2);
+        displayManager.showMessage("Disable PIN?", 10, 40, false, 2);
+        displayManager.showMessage("Enter PIN to confirm", 10, 70, false, 1);
+        delay(2000);
+        
+        // Запрашиваем PIN на устройстве
+        String enteredPin = pinManager.requestPinInput("Confirm Disable PIN");
+        
+        if (enteredPin.length() > 0) {
+            // PIN введен, пытаемся отключить защиту
+            displayManager.init();
+            displayManager.showMessage("Disabling PIN...", 10, 30, false, 2);
+            
+            if (CryptoManager::getInstance().disablePinEncryption(enteredPin)) {
+                LOG_INFO("Main", "PIN protection disabled via device confirmation");
+                
+                displayManager.init();
+                displayManager.showMessage("PIN Disabled!", 10, 30, false, 2);
+                displayManager.showMessage("Rebooting...", 10, 60, false, 2);
+                delay(2000);
+                
+                // Перезагружаемся
+                ESP.restart();
+            } else {
+                LOG_ERROR("Main", "Failed to disable PIN - wrong PIN");
+                
+                displayManager.init();
+                displayManager.showMessage("Wrong PIN!", 10, 30, true, 2);
+                displayManager.showMessage("Try again via web", 10, 60, false, 1);
+                delay(3000);
+            }
+        } else {
+            LOG_INFO("Main", "PIN disable cancelled by user");
+            
+            displayManager.init();
+            displayManager.showMessage("Cancelled", 10, 30, false, 2);
+            delay(1000);
+        }
+        
+        displayManager.init(); // Возвращаемся к нормальному экрану
+    }
+    
     // Проверяем таймаут API веб-сервера и самого сервера
     if (webServerManager.isRunning()) {
         WebAdminManager::getInstance().checkApiTimeout();
         webServerManager.update();
+        
+        // Process DNS for Admin AP mode
+        if (selectedMode == StartupMode::AP_MODE) {
+            adminDnsServer.processNextRequest();
+        }
         
 #ifdef SECURE_LAYER_ENABLED
         // ❌ DISABLED: Cleanup causes race condition without mutex
@@ -749,6 +1151,29 @@ void loop() {
     // Handle buttons based on the current mode for BLE states
     if (currentMode != AppMode::BLE_ADVERTISING && currentMode != AppMode::BLE_PIN_ENTRY && currentMode != AppMode::BLE_CONFIRM_SEND) {
         handleButtons();
+    }
+
+    // HOTP generation state machine — all heavy work done here in main loop
+    if (hotpSavePending) {
+        // Wait until both buttons released
+        if (digitalRead(BUTTON_1) == HIGH && digitalRead(BUTTON_2) == HIGH) {
+            delay(50); // stabilization
+            esp_task_wdt_reset();
+            
+            // Now do all heavy work from stable main loop context
+            keyManager.getKeyRef(hotpSaveIndex).counter++;
+            auto updatedKeys = keyManager.getAllKeys();
+            String newCode = totpGenerator.generateCode(updatedKeys[hotpSaveIndex]);
+            displayManager.updateTOTPCode(newCode, -1);
+            displayManager.eraseLoaderArea();
+            esp_task_wdt_reset();
+            keyManager.saveKeys();
+            esp_task_wdt_reset();
+            
+            hotpSavePending = false;
+            hotpSaveIndex = -1;
+            LOG_INFO("Main", "HOTP code generated and saved");
+        }
     }
 
     // Проверяем таймаут экрана ТОЛЬКО если веб-сервер НЕ активен
@@ -797,14 +1222,15 @@ void loop() {
     }
 
     if (isScreenOn) {
-        // Пропускаем обновления если активен лоадер, чтобы предотвратить наслоение
-        if (!displayManager.isLoaderActive()) {
+        // Пропускаем обновления если активен лоадер или QR код
+        if (!displayManager.isLoaderActive() && !displayManager.isQRCodeActive()) {
             // Обновляем статус батареи по таймеру (общий для всех режимов)
             if (millis() - lastBatteryCheckTime > batteryCheckInterval) {
                 lastBatteryCheckTime = millis();
                 int currentBatteryPercentage = batteryManager.getPercentage();
                 bool isCharging = (batteryManager.getVoltage() > 4.15);
                 displayManager.updateBatteryStatus(currentBatteryPercentage, isCharging);
+            displayManager.updateClockStatus();
             }
             
             // Мониторинг критического состояния памяти
@@ -835,22 +1261,23 @@ void loop() {
                         previousKeyIndex = currentKeyIndex;
                     }
                     
-                    if (!displayManager.isLoaderActive() && millis() - lastTotpUpdateTime > totpUpdateInterval) {
+                    if (!displayManager.isLoaderActive() && !displayManager.isQRCodeActive() && 
+                        millis() - lastTotpUpdateTime > totpUpdateInterval) {
                         lastTotpUpdateTime = millis();
                         
-                        // ⚠️ Проверка синхронизации времени
-                        if (!totpGenerator.isTimeSynced()) {
-                            // Показываем предупреждение вместо TOTP кода (убрали TIME для краткости)
+                        // 1. HOTP keys work without time synchronization
+                        if (keys[currentKeyIndex].type == TOTPType::HOTP) {
+                            String code = totpGenerator.generateCode(keys[currentKeyIndex]);
+                            displayManager.updateTOTPCode(code, -1, 30);
+                        }
+                        // 2. TOTP keys require time sync
+                        else if (!totpGenerator.isTimeSynced()) {
                             displayManager.updateTOTPCode("NOT SYNCED", 0);
                             
-                            // 🌐 Дополнительные предупреждения ТОЛЬКО для WiFi Mode
-                            // В AP и Offline режимах - только "TIME NOT SYNCED" без подсказок
                             if (WiFi.getMode() == WIFI_STA && WiFi.isConnected()) {
-                                // Показываем предупреждения периодически для WiFi режима
                                 static unsigned long lastWarningTime = 0;
                                 static bool warningsShown = false;
                                 
-                                // Показываем предупреждения каждые 5 секунд или при смене ключа
                                 if (currentKeyIndex != previousKeyIndex || 
                                     millis() - lastWarningTime > 5000 || 
                                     !warningsShown) {
@@ -858,12 +1285,10 @@ void loop() {
                                     lastWarningTime = millis();
                                     warningsShown = true;
                                     
-                                    // Очистка области предупреждений
                                     TFT_eSPI* tft = displayManager.getTft();
                                     tft->fillRect(0, 115, tft->width(), 60, 
                                                 displayManager.getCurrentThemeColors()->background_dark);
                                     
-                                    // Отцентрованные предупреждения
                                     tft->setTextDatum(MC_DATUM);
                                     tft->setTextColor(displayManager.getCurrentThemeColors()->text_secondary, 
                                                     displayManager.getCurrentThemeColors()->background_dark);
@@ -875,10 +1300,10 @@ void loop() {
                                 }
                             }
                         } else {
-                            // Время синхронизировано - показываем TOTP код
-                            String code = totpGenerator.generateTOTP(keys[currentKeyIndex].secret);
-                            int timeLeft = totpGenerator.getTimeRemaining();
-                            displayManager.updateTOTPCode(code, timeLeft);
+                            // 3. TOTP: Time is synced
+                            String code = totpGenerator.generateCode(keys[currentKeyIndex]);
+                            int timeLeft = totpGenerator.getTimeRemaining(keys[currentKeyIndex].period);
+                            displayManager.updateTOTPCode(code, timeLeft, keys[currentKeyIndex].period);
                         }
                     }
                 } else {
@@ -991,24 +1416,23 @@ void loop() {
 
             case AppMode::BLE_PIN_ENTRY:
                 {
-                    LOG_INFO("Main", "BLE secure connection established. Checking BLE PIN requirements...");
-                    LOG_DEBUG("Main", "BLE PIN enabled: " + String(pinManager.isPinEnabledForBle()));
-                    LOG_DEBUG("Main", "PIN set: " + String(pinManager.isPinSet() ? "yes" : "no"));
+                    LOG_INFO("Main", "BLE secure connection established. Checking Device BLE PIN requirements...");
                     
-                    // Проверяем BLE PIN только если он специально включен для BLE операций
                     bool pinOk = true;
-                    if (pinManager.isPinEnabledForBle() && pinManager.isPinSet()) {
-                        LOG_INFO("Main", "BLE PIN protection enabled, requesting PIN for transmission...");
-                        pinOk = pinManager.requestPin();
+                    
+                    // Проверяем включен ли Device BLE PIN
+                    if (CryptoManager::getInstance().isDeviceBlePinEnabled()) {
+                        LOG_INFO("Main", "Device BLE PIN protection enabled, requesting PIN for transmission...");
+                        pinOk = pinManager.requestDeviceBlePinForTransmission();
                     } else {
-                        LOG_INFO("Main", "BLE PIN protection disabled. Proceeding to send confirmation");
+                        LOG_INFO("Main", "Device BLE PIN protection disabled. Proceeding to send confirmation");
                     }
                     
                     if (pinOk) {
                         LOG_INFO("Main", "BLE access granted. Proceeding to send confirmation");
                         currentMode = AppMode::BLE_CONFIRM_SEND;
                     } else {
-                        LOG_WARNING("Main", "BLE PIN incorrect or cancelled. Returning to list");
+                        LOG_WARNING("Main", "Device BLE PIN incorrect or cancelled. Returning to list");
                         bleKeyboardManager.end();
                         currentMode = AppMode::PASSWORD;
                         bleActionTriggered = false;
