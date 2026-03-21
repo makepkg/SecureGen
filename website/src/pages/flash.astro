@@ -4,18 +4,25 @@ import Layout from '../layouts/Layout.astro';
 
 <Layout title="Flash Firmware — SecureGen" page="flash">
   <section class="page-header">
-    <h1>Flash Firmware</h1>
-    <p class="description">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.25rem;">
+      <h1 style="margin:0;" data-i18n="title">Flash Firmware</h1>
+      <div style="font-size:1.3rem;display:flex;gap:0.5rem;">
+        <button id="lang-en" style="background:none;border:none;cursor:pointer;font-size:1.3rem;opacity:1;" title="English">🇬🇧</button>
+        <button id="lang-ru" style="background:none;border:none;cursor:pointer;font-size:1.3rem;opacity:0.4;" title="Русский">🇷🇺</button>
+        <button id="lang-zh" style="background:none;border:none;cursor:pointer;font-size:1.3rem;opacity:0.4;" title="中文">🇨🇳</button>
+      </div>
+    </div>
+    <p class="description" data-i18n="description">
       Install SecureGen on your ESP32 directly from the browser. No drivers, no software, no command line.
     </p>
     <div class="callout callout-warning">
-      ⚠ Requires Chrome 89+ or Edge 89+ on desktop. Not supported in Firefox, Safari, or mobile browsers.
+      <span data-i18n="callout">⚠ Requires Chrome 89+ or Edge 89+ on desktop. Not supported in Firefox, Safari, or mobile browsers.</span>
     </div>
   </section>
 
   <section class="flash-card-container">
     <div class="flash-card">
-      <label class="select-label">Device Model</label>
+      <label class="select-label" data-i18n="label.board">Device Model</label>
       <select id="board-select" class="select-input">
         <option disabled selected>Loading boards...</option>
       </select>
@@ -23,7 +30,7 @@ import Layout from '../layouts/Layout.astro';
 
       <div class="divider"></div>
 
-      <label class="select-label">Firmware Version</label>
+      <label class="select-label" data-i18n="label.version">Firmware Version</label>
       <select id="version-select" class="select-input">
         <option disabled selected>Loading versions...</option>
       </select>
@@ -33,7 +40,7 @@ import Layout from '../layouts/Layout.astro';
 
       <esp-web-install-button id="flash-button" manifest="">
         <button slot="activate" class="flash-btn">
-          ⚡ Flash SecureGen
+          <span data-i18n="flash.btn">⚡ Flash SecureGen</span>
         </button>
         <span slot="unsupported" class="unsupported">
           ⚠ Your browser doesn't support Web Serial. 
@@ -42,52 +49,52 @@ import Layout from '../layouts/Layout.astro';
       </esp-web-install-button>
 
       <p class="warning-note">
-        This will erase all existing data on the device. Make sure to export backups first.
+        <span data-i18n="warning">This will erase all existing data on the device. Make sure to export backups first.</span>
       </p>
     </div>
   </section>
 
   <section class="steps-preview">
-    <h2>How it works:</h2>
+    <h2 data-i18n="how.title">How it works:</h2>
     <div class="steps-grid">
       <div class="step-card">
         <div class="step-icon">🔌</div>
-        <h3>Connect</h3>
-        <p>Plug in your ESP32 via USB</p>
+        <h3 data-i18n="step1.title">Connect</h3>
+        <p data-i18n="step1.desc">Plug in your ESP32 via USB</p>
       </div>
       <div class="step-card">
         <div class="step-icon">⚡</div>
-        <h3>Flash</h3>
-        <p>Click the button above, select your port</p>
+        <h3 data-i18n="step2.title">Flash</h3>
+        <p data-i18n="step2.desc">Click the button above, select your port</p>
       </div>
       <div class="step-card">
         <div class="step-icon">🚀</div>
-        <h3>Done</h3>
-        <p>Device reboots with SecureGen installed</p>
+        <h3 data-i18n="step3.title">Done</h3>
+        <p data-i18n="step3.desc">Device reboots with SecureGen installed</p>
       </div>
     </div>
   </section>
 
   <section class="manual-fallback">
     <details>
-      <summary>Manual installation with esptool (advanced)</summary>
+      <summary data-i18n="manual.summary">Manual installation with esptool (advanced)</summary>
       <div class="manual-content">
-        <h3>Step 1: Install esptool</h3>
+        <h3 data-i18n="manual.s1">Step 1: Install esptool</h3>
         <div class="code-block">
           <pre><code>pip install esptool</code></pre>
           <button class="btn-copy" data-copy="pip install esptool">Copy</button>
         </div>
 
-        <h3>Step 2: Download Firmware</h3>
+        <h3 data-i18n="manual.s2">Step 2: Download Firmware</h3>
         <p>
-          Download the latest firmware files from 
+          <span data-i18n="manual.s2.desc">Download the latest firmware files from</span> 
           <a href="https://github.com/makepkg/SecureGen/releases" target="_blank" rel="noopener noreferrer">
             GitHub Releases
           </a>
         </p>
 
-        <h3>Step 3: Flash all 3 files</h3>
-        <p><strong>Linux/Mac:</strong></p>
+        <h3 data-i18n="manual.s3">Step 3: Flash all 3 files</h3>
+        <p><strong data-i18n="manual.linux">Linux/Mac:</strong></p>
         <div class="code-block">
           <pre><code>esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
   write_flash \
@@ -97,7 +104,7 @@ import Layout from '../layouts/Layout.astro';
           <button class="btn-copy" data-copy="esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 write_flash 0x1000 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin">Copy</button>
         </div>
 
-        <p><strong>Windows:</strong></p>
+        <p><strong data-i18n="manual.windows">Windows:</strong></p>
         <div class="code-block">
           <pre><code>esptool.py --chip esp32 --port COM3 --baud 921600 \
   write_flash \
@@ -107,13 +114,13 @@ import Layout from '../layouts/Layout.astro';
           <button class="btn-copy" data-copy="esptool.py --chip esp32 --port COM3 --baud 921600 write_flash 0x1000 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin">Copy</button>
         </div>
 
-        <h3>Alternative: Single merged file (easier)</h3>
-        <p>Or use the merged binary (one file, easier):</p>
+        <h3 data-i18n="manual.alt">Alternative: Single merged file (easier)</h3>
+        <p data-i18n="manual.alt.desc">Or use the merged binary (one file, easier):</p>
         <div class="code-block">
           <pre><code>esptool.py --port /dev/ttyUSB0 write_flash 0x0 merged-firmware.bin</code></pre>
           <button class="btn-copy" data-copy="esptool.py --port /dev/ttyUSB0 write_flash 0x0 merged-firmware.bin">Copy</button>
         </div>
-        <p class="note">Windows: replace /dev/ttyUSB0 with COM3</p>
+        <p class="note" data-i18n="manual.note">Windows: replace /dev/ttyUSB0 with COM3</p>
       </div>
     </details>
   </section>
@@ -541,4 +548,101 @@ import Layout from '../layouts/Layout.astro';
   }
 
   document.addEventListener('DOMContentLoaded', init);
+</script>
+
+<script is:inline>
+const FLASH_I18N = {
+en: {
+title: 'Flash Firmware',
+description: 'Install SecureGen on your ESP32 directly from the browser. No drivers, no software, no command line.',
+'callout': '⚠ Requires Chrome 89+ or Edge 89+ on desktop. Not supported in Firefox, Safari, or mobile browsers.',
+'label.board': 'Device Model',
+'label.version': 'Firmware Version',
+'flash.btn': '⚡ Flash SecureGen',
+'warning': 'This will erase all existing data on the device. Make sure to export backups first.',
+'how.title': 'How it works:',
+'step1.title': 'Connect', 'step1.desc': 'Plug in your ESP32 via USB',
+'step2.title': 'Flash', 'step2.desc': 'Click the button above, select your port',
+'step3.title': 'Done', 'step3.desc': 'Device reboots with SecureGen installed',
+'manual.summary': 'Manual installation with esptool (advanced)',
+'manual.s1': 'Step 1: Install esptool',
+'manual.s2': 'Step 2: Download Firmware',
+'manual.s2.desc': 'Download the latest firmware files from',
+'manual.s3': 'Step 3: Flash all 3 files',
+'manual.linux': 'Linux/Mac:',
+'manual.windows': 'Windows:',
+'manual.alt': 'Alternative: Single merged file (easier)',
+'manual.alt.desc': 'Or use the merged binary (one file, easier):',
+'manual.note': 'Windows: replace /dev/ttyUSB0 with COM3'
+},
+zh: {
+title: '刷写固件',
+description: '直接从浏览器在ESP32上安装SecureGen。无需驱动、软件或命令行。',
+'callout': '⚠ 需要桌面端Chrome 89+或Edge 89+。Firefox、Safari或移动浏览器不支持。',
+'label.board': '设备型号',
+'label.version': '固件版本',
+'flash.btn': '⚡ 刷写SecureGen',
+'warning': '这将擦除设备上的所有现有数据。请先确保导出备份。',
+'how.title': '工作原理：',
+'step1.title': '连接', 'step1.desc': '通过USB插入ESP32',
+'step2.title': '刷写', 'step2.desc': '点击上方按钮，选择端口',
+'step3.title': '完成', 'step3.desc': '设备重启并安装SecureGen',
+'manual.summary': '使用esptool手动安装（高级）',
+'manual.s1': '第1步：安装esptool',
+'manual.s2': '第2步：下载固件',
+'manual.s2.desc': '从以下位置下载最新固件文件',
+'manual.s3': '第3步：刷写3个文件',
+'manual.linux': 'Linux/Mac：',
+'manual.windows': 'Windows：',
+'manual.alt': '替代方案：单个合并文件（更简单）',
+'manual.alt.desc': '或使用合并的二进制文件（一个文件，更简单）：',
+'manual.note': 'Windows：将/dev/ttyUSB0替换为COM3'
+},
+ru: {
+title: 'Прошивка устройства',
+description: 'Установите SecureGen на ESP32 прямо из браузера. Без драйверов, программ и командной строки.',
+'callout': '⚠ Требуется Chrome 89+ или Edge 89+ на компьютере. Не поддерживается в Firefox, Safari и мобильных браузерах.',
+'label.board': 'Модель устройства',
+'label.version': 'Версия прошивки',
+'flash.btn': '⚡ Прошить SecureGen',
+'warning': 'Это сотрёт все существующие данные на устройстве. Сначала экспортируйте резервные копии.',
+'how.title': 'Как это работает:',
+'step1.title': 'Подключите', 'step1.desc': 'Подключите ESP32 через USB',
+'step2.title': 'Прошейте', 'step2.desc': 'Нажмите кнопку выше, выберите порт',
+'step3.title': 'Готово', 'step3.desc': 'Устройство перезагружается с установленным SecureGen',
+'manual.summary': 'Ручная установка через esptool (для опытных)',
+'manual.s1': 'Шаг 1: Установите esptool',
+'manual.s2': 'Шаг 2: Скачайте прошивку',
+'manual.s2.desc': 'Скачайте последние файлы прошивки с',
+'manual.s3': 'Шаг 3: Прошейте 3 файла',
+'manual.linux': 'Linux/Mac:',
+'manual.windows': 'Windows:',
+'manual.alt': 'Альтернатива: единый объединённый файл (проще)',
+'manual.alt.desc': 'Или используйте объединённый бинарный файл (один файл, проще):',
+'manual.note': 'Windows: замените /dev/ttyUSB0 на COM3'
+}
+};
+
+let flashLang = localStorage.getItem('site_lang') || 'en';
+
+function trF(k) { return FLASH_I18N[flashLang]?.[k] ?? FLASH_I18N.en[k] ?? k; }
+
+function setFlashLang(l) {
+flashLang = l;
+localStorage.setItem('site_lang', l);
+if (typeof applyNavLang === 'function') applyNavLang();
+document.getElementById('lang-en').style.opacity = l === 'en' ? '1' : '0.4';
+document.getElementById('lang-ru').style.opacity = l === 'ru' ? '1' : '0.4';
+document.getElementById('lang-zh').style.opacity = l === 'zh' ? '1' : '0.4';
+document.querySelectorAll('[data-i18n]').forEach(el => {
+el.textContent = trF(el.dataset.i18n);
+});
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  setFlashLang(flashLang);
+  document.getElementById('lang-en').addEventListener('click', () => setFlashLang('en'));
+  document.getElementById('lang-ru').addEventListener('click', () => setFlashLang('ru'));
+  document.getElementById('lang-zh').addEventListener('click', () => setFlashLang('zh'));
+});
 </script>

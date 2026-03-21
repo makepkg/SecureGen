@@ -8,7 +8,7 @@
 - `pbkdf2-security.md` — PBKDF2 parameters, iteration counts, hardware constraints, compatibility notes for decrypt_export.html.
 
 ### development/
-- `api-endpoints.md` — Complete API reference. All endpoints with auth requirements, request/response formats, security notation.
+- `ENDPOINTS.md` — Complete API reference. All endpoints with auth requirements, request/response formats, security notation.
 - `system-design.md` — Internal architecture. Boot sequence, PIN design, shutdown/deep sleep, data persistence table, error handling.
 
 ### user/

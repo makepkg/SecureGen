@@ -4,14 +4,21 @@ import Layout from '../layouts/Layout.astro';
 
 <Layout title="SecureGen — Open Source TOTP Authenticator & Password Manager" page="home">
   <section class="hero">
+    <div style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:0.5rem;">
+      <div style="font-size:1.3rem;display:flex;gap:0.5rem;">
+        <button id="lang-en" style="background:none;border:none;cursor:pointer;font-size:1.3rem;opacity:1;" title="English">🇬🇧</button>
+        <button id="lang-ru" style="background:none;border:none;cursor:pointer;font-size:1.3rem;opacity:0.4;" title="Русский">🇷🇺</button>
+        <button id="lang-zh" style="background:none;border:none;cursor:pointer;font-size:1.3rem;opacity:0.4;" title="中文">🇨🇳</button>
+      </div>
+    </div>
     <p class="tagline">ESP32 · OPEN SOURCE · MIT LICENSE</p>
-    <h1>Your secrets stay on the device</h1>
-    <p class="subtitle">
+    <h1 data-i18n="hero.h1">Your secrets stay on the device</h1>
+    <p class="subtitle" data-i18n="hero.sub">
       TOTP authenticator and password manager for ESP32. No cloud. No subscriptions. 
       AES-256 encrypted. Fully open source.
     </p>
     <div class="button-row">
-      <a href="/SecureGen/flash" class="btn-primary">⚡ Flash your device</a>
+      <a href="/SecureGen/flash" class="btn-primary" data-i18n="hero.btn">⚡ Flash your device</a>
       <a href="https://github.com/makepkg/SecureGen" target="_blank" rel="noopener noreferrer" class="btn-secondary">GitHub →</a>
     </div>
     <div class="badge-row">
@@ -24,43 +31,43 @@ import Layout from '../layouts/Layout.astro';
   </section>
 
   <section class="features">
-    <p class="section-label">FEATURES</p>
+    <p class="section-label" data-i18n="feat.label">FEATURES</p>
     <div class="feature-grid">
       <div class="feature-card">
         <div class="icon">🔐</div>
-        <h3>TOTP & HOTP</h3>
-        <p>RFC 6238 and RFC 4226. Compatible with Google Authenticator, Authy, and all standard apps.</p>
+        <h3 data-i18n="feat1.title">TOTP & HOTP</h3>
+        <p data-i18n="feat1.desc">RFC 6238 and RFC 4226. Compatible with Google Authenticator, Authy, and all standard apps.</p>
       </div>
       <div class="feature-card">
         <div class="icon">🔑</div>
-        <h3>Password Manager</h3>
-        <p>Encrypted offline vault. BLE HID keyboard types passwords directly — no clipboard, no app needed.</p>
+        <h3 data-i18n="feat2.title">Password Manager</h3>
+        <p data-i18n="feat2.desc">Encrypted offline vault. BLE HID keyboard types passwords directly — no clipboard, no app needed.</p>
       </div>
       <div class="feature-card">
         <div class="icon">🌐</div>
-        <h3>Web Interface</h3>
-        <p>Runs on the device. Full management from any browser, no cloud, no account.</p>
+        <h3 data-i18n="feat3.title">Web Interface</h3>
+        <p data-i18n="feat3.desc">Runs on the device. Full management from any browser, no cloud, no account.</p>
       </div>
       <div class="feature-card">
         <div class="icon">🛡️</div>
-        <h3>AES-256 Encrypted</h3>
-        <p>Per-device key derived from your PIN via PBKDF2-HMAC-SHA256. Nothing stored in plaintext.</p>
+        <h3 data-i18n="feat4.title">AES-256 Encrypted</h3>
+        <p data-i18n="feat4.desc">Per-device key derived from your PIN via PBKDF2-HMAC-SHA256. Nothing stored in plaintext.</p>
       </div>
       <div class="feature-card">
         <div class="icon">⚡</div>
-        <h3>8-Layer Web Security</h3>
-        <p>ECDH key exchange, AES-GCM session encryption, URL obfuscation, traffic masking.</p>
+        <h3 data-i18n="feat5.title">8-Layer Web Security</h3>
+        <p data-i18n="feat5.desc">ECDH key exchange, AES-GCM session encryption, URL obfuscation, traffic masking.</p>
       </div>
       <div class="feature-card">
         <div class="icon">📡</div>
-        <h3>Works Offline</h3>
-        <p>TOTP codes require internet (NTP sync). Passwords and HOTP codes work in AP and offline modes — no internet needed.</p>
+        <h3 data-i18n="feat6.title">Works Offline</h3>
+        <p data-i18n="feat6.desc">Passwords and HOTP codes work in all modes. TOTP works offline with an optional DS3231 RTC module — no internet needed.</p>
       </div>
     </div>
   </section>
 
   <section class="quick-start">
-    <p class="section-label">QUICK START</p>
+    <p class="section-label" data-i18n="qs.label">QUICK START</p>
     <div class="terminal">
       <div class="terminal-bar">
         <span class="dot dot-red"></span>
@@ -76,7 +83,7 @@ $ cd SecureGen
   </section>
 
   <section class="links">
-    <p class="section-label">FIND US</p>
+    <p class="section-label" data-i18n="links.label">FIND US</p>
     <div class="links-grid">
       <a href="https://www.youtube.com/watch?v=YTVQBwgok_E" target="_blank" rel="noopener noreferrer" class="link-card">
         ▶ YouTube
@@ -93,6 +100,96 @@ $ cd SecureGen
     </div>
   </section>
 </Layout>
+
+<script is:inline>
+const INDEX_I18N = {
+  en: {
+    'hero.h1': 'Your secrets stay on the device',
+    'hero.sub': 'TOTP authenticator and password manager for ESP32. No cloud. No subscriptions. AES-256 encrypted. Fully open source.',
+    'hero.btn': '⚡ Flash your device',
+    'feat.label': 'FEATURES',
+    'feat1.title': 'TOTP & HOTP',
+    'feat1.desc': 'RFC 6238 and RFC 4226. Compatible with Google Authenticator, Authy, and all standard apps.',
+    'feat2.title': 'Password Manager',
+    'feat2.desc': 'Encrypted offline vault. BLE HID keyboard types passwords directly — no clipboard, no app needed.',
+    'feat3.title': 'Web Interface',
+    'feat3.desc': 'Runs on the device. Full management from any browser, no cloud, no account. Available in 5 languages: EN, RU, DE, ZH, ES.',
+    'feat4.title': 'AES-256 Encrypted',
+    'feat4.desc': 'Per-device key derived from your PIN via PBKDF2-HMAC-SHA256. Nothing stored in plaintext.',
+    'feat5.title': '8-Layer Web Security',
+    'feat5.desc': 'ECDH key exchange, AES-GCM session encryption, URL obfuscation, traffic masking.',
+    'feat6.title': 'Works Offline',
+    'feat6.desc': 'Passwords and HOTP codes work in all modes. TOTP works offline with an optional DS3231 RTC module — no internet needed.',
+    'qs.label': 'QUICK START',
+    'links.label': 'FIND US'
+  },
+  zh: {
+    'hero.h1': '您的秘密保留在设备上',
+    'hero.sub': 'ESP32的TOTP验证器和密码管理器。无云端。无订阅。AES-256加密。完全开源。',
+    'hero.btn': '⚡ 刷写设备',
+    'feat.label': '功能特性',
+    'feat1.title': 'TOTP & HOTP',
+    'feat1.desc': 'RFC 6238和RFC 4226。兼容Google Authenticator、Authy及所有标准应用。',
+    'feat2.title': '密码管理器',
+    'feat2.desc': '加密离线保险库。BLE HID键盘直接输入密码——无需剪贴板，无需应用。',
+    'feat3.title': 'Web界面',
+    'feat3.desc': '运行在设备上。从任何浏览器完全管理，无云端，无账户。界面支持5种语言：EN、RU、DE、ZH、ES。',
+    'feat4.title': 'AES-256加密',
+    'feat4.desc': '通过PBKDF2-HMAC-SHA256从PIN派生设备密钥。没有任何明文存储。',
+    'feat5.title': '8层Web安全',
+    'feat5.desc': 'ECDH密钥交换、AES-GCM会话加密、URL混淆、流量掩盖。',
+    'feat6.title': '离线工作',
+    'feat6.desc': '密码和HOTP代码在所有模式下均可工作。TOTP可配合可选的DS3231 RTC模块离线工作——无需互联网。',
+    'qs.label': '快速开始',
+    'links.label': '找到我们'
+  },
+  ru: {
+    'hero.h1': 'Ваши секреты остаются на устройстве',
+    'hero.sub': 'TOTP-аутентификатор и менеджер паролей для ESP32. Без облака. Без подписок. Шифрование AES-256. Полностью открытый исходный код.',
+    'hero.btn': '⚡ Прошить устройство',
+    'feat.label': 'ВОЗМОЖНОСТИ',
+    'feat1.title': 'TOTP & HOTP',
+    'feat1.desc': 'RFC 6238 и RFC 4226. Совместим с Google Authenticator, Authy и всеми стандартными приложениями.',
+    'feat2.title': 'Менеджер паролей',
+    'feat2.desc': 'Зашифрованное офлайн-хранилище. BLE HID-клавиатура вводит пароли напрямую — без буфера обмена и приложений.',
+    'feat3.title': 'Веб-интерфейс',
+    'feat3.desc': 'Работает на устройстве. Полное управление из любого браузера, без облака и аккаунтов. Интерфейс доступен на 5 языках: EN, RU, DE, ZH, ES.',
+    'feat4.title': 'Шифрование AES-256',
+    'feat4.desc': 'Ключ устройства формируется из PIN через PBKDF2-HMAC-SHA256. Ничего не хранится в открытом виде.',
+    'feat5.title': '8-уровневая защита',
+    'feat5.desc': 'Обмен ключами ECDH, шифрование сессии AES-GCM, обфускация URL, маскировка трафика.',
+    'feat6.title': 'Работает офлайн',
+    'feat6.desc': 'Пароли и коды HOTP работают во всех режимах. TOTP работает офлайн с опциональным модулем DS3231 RTC — интернет не нужен.',
+    'qs.label': 'БЫСТРЫЙ СТАРТ',
+    'links.label': 'МЫ В СЕТИ'
+  }
+};
+
+let indexLang = localStorage.getItem('site_lang') || 'en';
+
+function trI(k) { 
+  return INDEX_I18N[indexLang]?.[k] ?? INDEX_I18N.en[k] ?? k; 
+}
+
+function setIndexLang(l) {
+  indexLang = l;
+  localStorage.setItem('site_lang', l);
+  if (typeof applyNavLang === 'function') applyNavLang();
+  document.getElementById('lang-en').style.opacity = l === 'en' ? '1' : '0.4';
+  document.getElementById('lang-ru').style.opacity = l === 'ru' ? '1' : '0.4';
+  document.getElementById('lang-zh').style.opacity = l === 'zh' ? '1' : '0.4';
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    el.textContent = trI(el.dataset.i18n);
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  setIndexLang(indexLang);
+  document.getElementById('lang-en').addEventListener('click', () => setIndexLang('en'));
+  document.getElementById('lang-ru').addEventListener('click', () => setIndexLang('ru'));
+  document.getElementById('lang-zh').addEventListener('click', () => setIndexLang('zh'));
+});
+</script>
 
 <style>
   .hero {

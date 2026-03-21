@@ -31,7 +31,7 @@ public:
     void turnOn();
     void setBrightness(uint8_t brightness); // Set backlight brightness (0-255) for fade effects
     bool promptWebServerSelection(); // New function for user prompt
-    StartupMode promptModeSelection(); // Промптинг выбора режима (AP/Offline/WiFi)
+    StartupMode promptModeSelection(StartupMode defaultMode = StartupMode::WIFI_MODE); // Промптинг выбора режима (AP/Offline/WiFi)
 
     void drawNoItemsPage(const String& text);
     void drawBleInitLoader(int progress);
@@ -79,6 +79,7 @@ private:
     TFT_eSPI tft;
     AnimationManager animationManager;
     TFT_eSprite headerSprite;
+    TFT_eSprite batterySprite = TFT_eSprite(&tft);
     TFT_eSprite totpContainerSprite;
     TFT_eSprite totpSprite;
     const ThemeColors* _currentThemeColors; // Pointer to the active theme colors

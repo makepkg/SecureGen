@@ -54,6 +54,7 @@ bool URLObfuscationManager::begin() {
     registerCriticalEndpoint("/api/pincode_settings", "PIN Security Settings");
     registerCriticalEndpoint("/api/change_password", "Web Cabinet Password Change");
     registerCriticalEndpoint("/api/change_ap_password", "WiFi AP Password Change");
+    registerCriticalEndpoint("/api/wifi_credentials", "WiFi Credentials Update");
     registerCriticalEndpoint("/api/session_duration", "Session Duration Settings");
     registerCriticalEndpoint("/api/activity", "Activity Timer Reset");
     registerCriticalEndpoint("/api/enable_import_export", "API Access Control");
@@ -62,6 +63,9 @@ bool URLObfuscationManager::begin() {
     registerCriticalEndpoint("/api/display_settings", "Display Settings");
     registerCriticalEndpoint("/api/splash/mode", "Splash Screen Selection");
     registerCriticalEndpoint("/api/clock_settings", "Clock Display Settings");
+    registerCriticalEndpoint("/api/rtc", "DS3231 RTC Module");
+    registerCriticalEndpoint("/api/battery", "battery_status");
+    registerCriticalEndpoint("/api/boot-mode", "Boot Mode Selection");
     registerCriticalEndpoint("/api/ble_pin_update", "BLE PIN Update");
     registerCriticalEndpoint("/api/clear_ble_clients", "Clear BLE Clients");
     registerCriticalEndpoint("/api/ble_settings", "BLE Device Settings");

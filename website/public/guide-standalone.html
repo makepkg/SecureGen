@@ -371,9 +371,13 @@
 
   <!-- Sidebar -->
   <nav class="sidebar">
-    <div class="sidebar-logo">
+    <div class="sidebar-logo" style="position:relative;">
       <span class="device-name">ESP32 T-Display</span>
       <h1>SecureGen</h1>
+      <div style="position:absolute;bottom:0;right:0.5rem;font-size:0.8rem;">
+        <strong style="color:var(--accent);">🇬🇧</strong> &nbsp;
+        <a href="guide-standalone.ru.html" style="color:var(--text-dim);text-decoration:none;">🇷🇺</a>
+      </div>
     </div>
     <div class="nav-section">
       <span class="nav-label">Device</span>
@@ -387,6 +391,7 @@
     <div class="nav-section">
       <span class="nav-label">Web Cabinet</span>
       <a href="#web-access" class="nav-link">Access & Login</a>
+      <a href="#widget-bar" class="nav-link">Widget Bar</a>
       <a href="#keys" class="nav-link">Keys (TOTP / HOTP)</a>
       <a href="#passwords" class="nav-link">Passwords</a>
       <a href="#display" class="nav-link">Display</a>
@@ -444,7 +449,8 @@
         <h2>Operating Modes</h2>
       </div>
 
-      <p>After entering the PIN on every boot, you have a few seconds to select a mode by pressing a button. If nothing is pressed, WiFi mode starts automatically.</p>
+      <p>After entering the PIN on every boot, the device shows a mode selection prompt. Two buttons appear on screen — they represent the two non-default network modes. The third mode (your configured default) starts automatically after a <strong>2-second</strong> timeout if no button is pressed.</p>
+      <p>The default mode on timeout is configurable in <strong>Settings → Boot Mode</strong>. Factory default is WiFi Client. Each button press resets the timeout by 2 seconds.</p>
 
       <div class="mode-grid">
         <div class="mode-card">
@@ -455,7 +461,7 @@
             <li>HOTP codes</li>
             <li>Web cabinet</li>
             <li>BLE transfer</li>
-            <li class="no">TOTP codes</li>
+            <li>TOTP (DS3231 required)</li>
           </ul>
         </div>
         <div class="mode-card">
@@ -465,7 +471,7 @@
             <li>Passwords</li>
             <li>HOTP codes</li>
             <li>BLE transfer</li>
-            <li class="no">TOTP codes</li>
+            <li>TOTP (DS3231 required)</li>
             <li class="no">Web cabinet</li>
           </ul>
         </div>
@@ -510,7 +516,7 @@
             <tr><td><span class="key">▲ Top</span></td><td>Increment current digit</td></tr>
             <tr><td><span class="key">▼ Bottom</span></td><td>Move to next digit</td></tr>
             <tr><td>Double press <span class="key">▼ Bottom</span></td><td>Go back one digit</td></tr>
-            <tr><td>Hold both buttons</td><td>Power off device</td></tr>
+            <tr><td>Hold both buttons</td><td>Power off — enters deep sleep. Press <span class="key">▼ Bottom</span> to wake (PIN required).</td></tr>
           </tbody>
         </table>
       </div>
@@ -525,7 +531,7 @@
             <tr><td>Hold both (on HOTP)</td><td>Advance counter — get next HOTP code</td></tr>
             <tr><td>Hold both (on TOTP)</td><td>No action</td></tr>
             <tr><td>Hold <span class="key">▲ Top</span> 5 sec</td><td>Switch to password manager</td></tr>
-            <tr><td>Hold <span class="key">▼ Bottom</span></td><td>Shutdown</td></tr>
+            <tr><td>Hold <span class="key">▼ Bottom</span></td><td>Shutdown — enters deep sleep. Press <span class="key">▼ Bottom</span> to wake (PIN required).</td></tr>
           </tbody>
         </table>
       </div>
@@ -539,7 +545,7 @@
             <tr><td><span class="key">▼ Bottom</span></td><td>Next password</td></tr>
             <tr><td>Hold both buttons</td><td>Start BLE transfer</td></tr>
             <tr><td>Hold <span class="key">▲ Top</span> 5 sec</td><td>Switch back to TOTP / HOTP</td></tr>
-            <tr><td>Hold <span class="key">▼ Bottom</span></td><td>Shutdown</td></tr>
+            <tr><td>Hold <span class="key">▼ Bottom</span></td><td>Shutdown — enters deep sleep. Press <span class="key">▼ Bottom</span> to wake (PIN required).</td></tr>
           </tbody>
         </table>
       </div>
@@ -627,6 +633,31 @@
       <div class="callout callout-danger">
         <strong>Login Attempts</strong>
         Multiple failed login attempts will lock access until the device is rebooted.
+      </div>
+    </div>
+
+    <!-- WIDGET BAR -->
+    <div class="section" id="widget-bar">
+      <div class="section-header">
+        <span class="section-num">07b</span>
+        <h2>Widget Bar</h2>
+      </div>
+
+      <p>The widget bar is a thin strip at the top of the web cabinet interface. It contains two elements on opposite sides.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Element</th><th>Location</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>🔋 Battery</td><td>Left side</td><td>Shows current battery charge level (device must have a 3.7V LiPo battery connected). Displays percentage and voltage. While charging, an animated icon is shown.</td></tr>
+            <tr><td>🌐 Language</td><td>Right side</td><td>Flag icon with a dropdown — switch the web cabinet interface language. Available languages: English, Russian, German, Chinese, Spanish. Selection is saved in the browser and persists across sessions.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout-info">
+        <strong>Language Switcher</strong>
+        Changing the language updates all labels, buttons, and notifications instantly — no page reload required. The setting is stored per browser, not on the device.
       </div>
     </div>
 
@@ -730,11 +761,27 @@
             <tr><td>Theme</td><td>Light, Dark</td></tr>
             <tr><td>Timezone</td><td>Used for the clock widget shown on device screen</td></tr>
             <tr><td>Splash screen</td><td>Image shown on boot: SecureGen (original), Blade Runner 2044, Combs</td></tr>
-            <tr><td>Screen timeout</td><td>Time until screen turns off automatically</td></tr>
+            <tr><td>Screen timeout</td><td>Time until the display turns off and the device enters low-power pseudo-sleep (CPU slowed to 40 MHz, TFT controller suspended). Press either button to wake — no PIN required. Set to <strong>Never</strong> to keep the screen on indefinitely.</td></tr>
+            <tr><td>Auto Lock</td><td>Time after which the device enters deep sleep and wipes all sensitive data from RAM. Requires PIN on wake. Counted from last activity — starts after the device enters pseudo-sleep when screen timeout is enabled, or directly from last button press when screen timeout is Never. Must be longer than screen timeout when both are non-zero. Set to <strong>Never</strong> to disable. Wake from deep sleep: press <span class="key">▼ Bottom</span>.</td></tr>
+            <tr><td>DS3231 RTC Module</td><td>External hardware clock. When enabled, the device keeps accurate time without WiFi. Required for TOTP in AP and Offline modes. Configure I2C pins (default SDA=21, SCL=22) and press <strong>Sync &amp; Save</strong> to set time from browser clock.</td></tr>
           </tbody>
         </table>
       </div>
-      <p>Each setting has its own Save button.</p>
+      <div class="callout callout-info">
+        <strong>Screen &amp; Lock Settings</strong>
+        Screen timeout and Auto Lock are configured together in one block with a single <strong>Save Settings</strong> button. Both can be set independently — either or both can be set to Never. If Auto Lock is set shorter than or equal to screen timeout, the value is automatically adjusted upward in the UI.
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Screen Timeout</th><th>Auto Lock</th><th>Behaviour</th></tr></thead>
+          <tbody>
+            <tr><td>30 seconds</td><td>5 minutes</td><td>Screen off after 30 s → deep sleep after 5 min of no activity</td></tr>
+            <tr><td>Never</td><td>5 minutes</td><td>Screen stays on → deep sleep after 5 min of no button press</td></tr>
+            <tr><td>30 seconds</td><td>Never</td><td>Screen off after 30 s → stays in pseudo-sleep indefinitely, wake on button</td></tr>
+            <tr><td>Never</td><td>Never</td><td>Screen always on, no automatic sleep or lock</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- PIN -->
@@ -782,6 +829,13 @@
       <h3>Change AP Password</h3>
       <p>Password for the device's own WiFi access point.</p>
 
+      <h3>WiFi Network</h3>
+      <p>Change the WiFi network credentials the device connects to in WiFi Client mode. Enter the network SSID (use the <strong>Scan</strong> button to find available networks), password, and confirm password, then click <strong>Save WiFi Credentials</strong>.</p>
+      <div class="callout callout-info">
+        <strong>Note</strong>
+        Changes take effect after reboot. The current connection is not interrupted.
+      </div>
+
       <h3>Bluetooth</h3>
       <p>BLE device name — maximum 15 characters. This is the name visible when pairing.</p>
 
@@ -790,6 +844,9 @@
 
       <h3>Startup Mode</h3>
       <p>Default screen on boot: TOTP/HOTP view or password manager.</p>
+
+      <h3>Boot Mode</h3>
+      <p>Default network mode on boot: WiFi Client, AP Mode, or Offline. The selected mode becomes the timeout default during the boot prompt — the other two modes remain selectable via buttons. Changes take effect on next reboot. Factory default: WiFi Client.</p>
 
       <h3>Web Server Auto-Shutdown</h3>
       <p>Automatically stops the web server after inactivity: 5 min, 10 min, 1 hour, or never.</p>

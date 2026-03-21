@@ -43,6 +43,7 @@ Platform
 | `ConfigManager` | Non-sensitive configuration persistence |
 | `DisplayManager` | TFT display, UI rendering, themes |
 | `BatteryManager` | ADC battery monitoring |
+| `RTCManager` | DS3231 hardware RTC: config load/save, I2C init, time read/write, boot compensation |
 
 ---
 
@@ -106,10 +107,41 @@ If LittleFS mount fails: device halts with error screen.
 13. `PinManager::begin()` — load PIN UI preferences
 14. Splash screen (if enabled)
 
+### Phase 5.5 — DS3231 RTC init (optional)
+
+Between PIN unlock and mode selection, if DS3231 is enabled in config:
+
+```
+Wire.begin(sda_pin, scl_pin)
+rtc.begin() → chip found?
+  Yes → rtc.now().unixtime() > 1609459200?
+    Yes → settimeofday() → system clock set from RTC
+    No → battery dead or never calibrated → timeSynced = false
+  No → LOG_ERROR, timeSynced = false
+```
+
+Config stored in `/rtc_config.json`: `{"enabled": bool, "sda_pin": int, "scl_pin": int}`  
+Default pins: SDA=21, SCL=22. Custom pins applied via `reinit()` on-the-fly without reboot.
+
+**Per-mode behaviour after RTC init:**
+
+| Mode | RTC enabled + valid | RTC disabled or invalid |
+|------|-------------------|------------------------|
+| WiFi | Sets initial time, then NTP overwrites and saves back to RTC | NTP is mandatory source |
+| AP | TOTP works immediately; user can re-sync via web cabinet | System clock zeroed → NOT SYNCED |
+| Offline | TOTP works; re-sync on next AP/WiFi boot | NOT SYNCED |
+
+**Pseudo-sleep re-sync:** On every wake from pseudo-sleep, if DS3231 is available, `syncFromRTC()` is called to correct ESP32 internal RTC drift accumulated during sleep. Note: pseudo-sleep reduces CPU to 40 MHz and suspends the TFT controller — it does not use `esp_light_sleep_start()` due to hardware incompatibility with battery power (voltage drop on CPU wake causes POWER_ON reset).
+
+**NTP → RTC write-back (WiFi mode):** After successful NTP sync, time is written to DS3231 on a second boundary (busy-wait for `tv_sec` rollover) to minimize sub-second accumulation error.
+
 ### Phase 6 — Mode selection
 
-15. User prompt: WiFi / AP / Offline (3-second timeout → WiFi)
-16. Selection saved and restored on next boot
+15. `configManager.getBootMode()` → load saved default (`"wifi"` / `"ap"` / `"offline"`)
+16. User prompt: two non-default modes shown as buttons (2-second timeout → saved default)
+17. Button press resets timeout; BUTTON_2 confirms immediately
+
+Default is configurable via web cabinet (Settings → Boot Mode). Factory default: `"wifi"`. Stored as `boot_mode` field in `/config.json`.
 
 ### Phase 7 — Network init (WiFi and AP modes only)
 
@@ -194,7 +226,7 @@ Enabling PIN requires factory reset because the existing device key must be repl
 
 ## Shutdown and Deep Sleep
 
-The device has no hard power-off. "Shutdown" means entering deep sleep via `esp_deep_sleep_start()`. Wake requires RST button.
+The device has no hard power-off. "Shutdown" means entering deep sleep via `esp_deep_sleep_start()`. Wake is via GPIO0 (▼ Bottom button) — configured via `esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0)` before every `esp_deep_sleep_start()` call. RST button also wakes the device.
 
 ### Trigger locations
 
@@ -203,6 +235,8 @@ The device has no hard power-off. "Shutdown" means entering deep sleep via `esp_
 | Hold BTN2 5 seconds | `src/main.cpp` | In TOTP or Password display mode |
 | Hold both buttons 5 seconds | `src/pin_manager.cpp` | During PIN entry |
 | PIN lockout | `src/main.cpp` | 5 failed attempts reached |
+| Auto Lock timeout | `src/main.cpp` | Inside pseudo-sleep polling loop when `auto_lock_timeout > 0` |
+| Auto Lock (screen=Never) | `src/main.cpp` | In main loop when `screen_timeout == 0` and `auto_lock_timeout > 0` |
 
 ### Secure shutdown
 
@@ -254,12 +288,13 @@ Sessions are stored encrypted in `/session.json.enc`. They survive reboots. Dura
 | `/session.json.enc` | Device key | Web session data |
 | `/ble_pin.json.enc` | Device key | BLE PIN |
 | `/pin_config.json` | Device key | BLE PIN enabled flag, config version |
-| `/config.json` | None (AP password field encrypted) | Theme, timeouts, startup mode |
+| `/config.json` | None (AP password field encrypted) | Theme, timeouts, startup mode, boot mode |
 | `/ble_config.json` | None | BLE device name |
 | `/mdns_config.json` | None | mDNS hostname |
 | `/.sys_ui_prefs` | None | PIN length (UI preference only) |
 | `/.pin_attempts` | None | Failed PIN attempt counter (integer) |
 | `/boot_counter.txt` | None | URL obfuscation epoch counter |
+| `/rtc_config.json` | None | DS3231 RTC enabled flag, SDA/SCL pins |
 
 URL obfuscation mappings are fully pre-generated at startup via `registerCriticalEndpoint()` rather than on-demand. This avoids repeated flash writes during normal operation — all 38 mappings are written once per epoch (every 30 reboots).
 

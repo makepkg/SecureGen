@@ -26,6 +26,10 @@ public:
     String getStartupMode();
     bool saveStartupMode(const String& mode);
     
+    // Boot Mode functions (AP/Offline/WiFi default boot selection)
+    String getBootMode();
+    bool saveBootMode(const String& mode);
+    
     // Web server configuration
     uint16_t getWebServerTimeout();
     void setWebServerTimeout(uint16_t timeoutMinutes);
@@ -47,6 +51,9 @@ public:
     // Display Timeout functions
     uint16_t getDisplayTimeout();
     bool saveDisplayTimeout(uint16_t timeout);
+    
+    uint32_t getAutoLockTimeout();
+    bool saveAutoLockTimeout(uint32_t timeout);
 
     String getTimezone();
     bool saveTimezone(const String& tz);
@@ -62,6 +69,8 @@ private:
     String _currentMdnsHostname = DEFAULT_MDNS_HOSTNAME; // Default mDNS hostname
     uint16_t _cachedDisplayTimeout = 30; // Default display timeout (cached)
     bool _displayTimeoutCached = false; // Flag to track if timeout is cached
+    uint32_t _cachedAutoLockTimeout = 0; // Default auto lock timeout (cached, 0=Never)
+    bool _autoLockTimeoutCached = false; // Flag to track if auto lock timeout is cached
     SessionDuration _currentSessionDuration = SIX_HOURS; // Default session duration
 };
 

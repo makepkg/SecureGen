@@ -37,6 +37,3 @@ compile_commands.json
 website/node_modules/
 website/dist/
 website/.astro/
-
-# Firmware binaries (never commit, always from Releases)
-website/public/firmware/*.bin

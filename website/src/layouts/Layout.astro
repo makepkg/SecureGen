@@ -29,10 +29,10 @@ const base = '/SecureGen';
       <div class="nav-left">
         <a href={base + '/'} class="logo">SecureGen</a>
         <div class="nav-links" id="navLinks">
-          <a href={base + '/'} class={page === 'home' ? 'active' : ''}>Home</a>
-          <a href={base + '/flash'} class={page === 'flash' ? 'active' : ''}>Flash</a>
-          <a href={base + '/guide'} class={page === 'guide' ? 'active' : ''}>Guide</a>
-          <a href={base + '/tools'} class={page === 'tools' ? 'active' : ''}>Tools</a>
+          <a href={base + '/'} class={page === 'home' ? 'active' : ''} data-i18n-nav="nav.home">Home</a>
+          <a href={base + '/flash'} class={page === 'flash' ? 'active' : ''} data-i18n-nav="nav.flash">Flash</a>
+          <a href={base + '/guide'} class={page === 'guide' ? 'active' : ''} data-i18n-nav="nav.guide">Guide</a>
+          <a href={base + '/tools'} class={page === 'tools' ? 'active' : ''} data-i18n-nav="nav.tools">Tools</a>
         </div>
       </div>
       <button class="hamburger" id="hamburger" aria-label="Toggle menu">☰</button>
@@ -61,6 +61,25 @@ const base = '/SecureGen';
     hamburger?.addEventListener('click', () => {
       navLinks?.classList.toggle('show');
     });
+  </script>
+
+  <script is:inline>
+    const NAV_I18N = {
+      en: { 'nav.home': 'Home', 'nav.flash': 'Flash', 'nav.guide': 'Guide', 'nav.tools': 'Tools' },
+      ru: { 'nav.home': 'Главная', 'nav.flash': 'Прошивка', 'nav.guide': 'Гайд', 'nav.tools': 'Инструменты' },
+      zh: { 'nav.home': '首页', 'nav.flash': '刷写', 'nav.guide': '指南', 'nav.tools': '工具' }
+    };
+
+    function applyNavLang() {
+      const lang = localStorage.getItem('site_lang') || 'en';
+      const t = NAV_I18N[lang] || NAV_I18N.en;
+      document.querySelectorAll('[data-i18n-nav]').forEach(el => {
+        el.textContent = t[el.getAttribute('data-i18n-nav')] || el.textContent;
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', applyNavLang);
+    window.addEventListener('storage', applyNavLang);
   </script>
 </body>
 </html>

@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.1.0] — March 2026
+
+### Web Interface
+- **Multilingual interface** — web cabinet now supports English, Russian, German, Chinese (Simplified), and Spanish; language switcher in the widget bar persists selection across sessions
+- **Battery widget** — live battery level and charging indicator in the web cabinet widget bar
+- **WiFi credentials management** — configure WiFi SSID and password directly from the web cabinet without AP mode
+- **Boot mode setting** — configure default startup mode (WiFi / AP / Offline) from Settings tab
+- Removed obsolete "instructions" page from web server
+
+### Hardware & Stability
+- **DS3231 RTC module support** — accurate offline timekeeping; enables TOTP in AP and Offline modes without WiFi or NTP
+- **Light sleep remaster** — fixed crash-on-wake on battery power caused by GPIO0 hardware interaction; pseudo-sleep now uses 40 MHz CPU + display suspend instead of `esp_light_sleep_start()`
+- **Auto lock** — new deep sleep option with RAM wipe after configurable inactivity timeout
+- **Battery charging animation** — animated charging indicator on device screen when connected to power
+- Fixed broken sign-in on main screen
+
+---
+
 ## [2.0.0] — March 2026
 
 ### Security

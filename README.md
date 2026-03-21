@@ -13,6 +13,7 @@
 [![Dev.to](https://img.shields.io/badge/Dev.to-Blog-0A0A0A?logo=dev.to)](https://dev.to/makepkg)
 [![Product Hunt](https://img.shields.io/badge/Product_Hunt-Launched-DA552F?logo=producthunt&logoColor=white)](https://www.producthunt.com/products/securegen-2)
 [![Flash Online](https://img.shields.io/badge/Flash-Online-brightgreen?logo=espressif)](https://makepkg.github.io/SecureGen/flash)
+[![Languages](https://img.shields.io/badge/Languages-EN%20%7C%20RU%20%7C%20DE%20%7C%20ZH%20%7C%20ES-informational)](#)
 
 [Video Demo](#-video-demo) • [Features](#-key-features) • [Installation](#-quick-start) • [Documentation](#-documentation) • [Security](#-security) • [Support](#-support)
 
@@ -31,6 +32,18 @@
       <br/>Real-time authentication codes
     </td>
     <td align="center" width="33%">
+      <img src="assets/screenshots/photos/totp-light-mode.jpg" alt="Light Theme" width="100%"/>
+      <br/><b>TOTP Mode (Light Theme)</b>
+      <br/>Customizable display themes
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/photos/hotp-light-mode.jpg" alt="HOTP Light Theme" width="100%"/>
+      <br/><b>HOTP Mode (Light Theme)</b>
+      <br/>Counter-based authentication
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="33%">
       <img src="assets/screenshots/photos/password-manager-mode.jpg" alt="Password Manager" width="100%"/>
       <br/><b>Password Manager Mode</b>
       <br/>Secure offline password vault
@@ -40,12 +53,17 @@
       <br/><b>BLE Security Mode</b>
       <br/>Encrypted wireless transmission
     </td>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/photos/qr-code-export.jpg" alt="QR Export" width="100%"/>
+      <br/><b>QR Code Export</b>
+      <br/>Export keys directly from display
+    </td>
   </tr>
   <tr>
     <td align="center" width="33%">
-      <img src="assets/screenshots/photos/totp-light-mode.jpg" alt="Light Theme" width="100%"/>
-      <br/><b>Light Theme UI</b>
-      <br/>Customizable display themes
+      <img src="assets/screenshots/photos/boot-mode-prompt.jpg" alt="Boot Mode Selection" width="100%"/>
+      <br/><b>Boot Mode Selection</b>
+      <br/>WiFi / AP / Offline at startup
     </td>
     <td align="center" width="33%">
       <img src="assets/screenshots/photos/battery-status.jpg" alt="Battery Status" width="100%"/>
@@ -53,10 +71,19 @@
       <br/>Real-time monitoring
     </td>
     <td align="center" width="33%">
+      <img src="assets/screenshots/photos/device-ambient.jpg" alt="Device Ambient" width="100%"/>
+      <br/><b>Hardware Overview</b>
+      <br/>Compact open-source design
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="33%">
       <img src="assets/screenshots/photos/factory-reset.jpg" alt="Factory Reset" width="100%"/>
       <br/><b>Factory Reset</b>
       <br/>Secure data wiping
     </td>
+    <td align="center" width="33%"></td>
+    <td align="center" width="33%"></td>
   </tr>
 </table>
 
@@ -135,6 +162,7 @@
 - Full TOTP and password management from any browser
 - Password generator with complexity settings
 - Three network modes: WiFi client, AP hotspot, or fully offline
+- Multilingual interface — English, Russian, German, Chinese (Simplified), and Spanish
 
 ### 🎨 Display & Themes
 - Light and dark themes, switchable from the web interface
@@ -145,6 +173,7 @@
 - LILYGO® TTGO T-Display ESP32 — dual-core 240MHz, 1.14" TFT display
 - Battery monitoring with real-time voltage and percentage
 - Deep sleep and light sleep power saving
+- **DS3231 RTC module support** — accurate offline timekeeping without WiFi; enables TOTP in AP and Offline modes
 
 ---
 
@@ -231,12 +260,11 @@ cd SecureGen
 ## 🗺️ Roadmap
 
 - Quick search by account name, favorites / pinned accounts, grouping by tags (work, personal, finance)
-- RTC module support for offline timekeeping without NTP
-- Multilingual support (English, Russian, Ukrainian, Chinese, German)
-- Adapt firmware for other ESP32 boards
+- Adapt firmware for other ESP32  (T-Display-S3)
 - Informative setting flags in web cabinet
 - Flash encryption and secure boot (optional hardening)
-- Boot mode selection improvements — configurable default startup mode
+- Migration ECDH P-256 → X25519
+- Support ATECC608 Secure module
 
 ---
 

@@ -152,6 +152,9 @@ void DisplayManager::init() {
     headerSprite.createSprite(tft.width(), 35);
     headerSprite.setTextDatum(MC_DATUM);
 
+    batterySprite.createSprite(30, 20);
+    batterySprite.setColorDepth(16);
+
     // Создание спрайтов для TOTP
     int padding = 10;
     tft.setTextSize(4);
@@ -192,7 +195,7 @@ void DisplayManager::drawLayout(const String& serviceName, int batteryPercentage
     _introAnimStartTime = millis();
 
     lastDisplayedCode = ""; 
-    lastTimeRemaining = -1;
+    lastTimeRemaining = -999;
     _lastDrawnTotpString = "";
     _totpState = TotpState::IDLE;
     _totpContainerNeedsRedraw = true;
@@ -235,10 +238,36 @@ void DisplayManager::updateBatteryStatus(int percentage, bool isCharging) {
         tft.fillRect(batteryX + batteryWidth, batteryY + 3, 2, 5, _currentThemeColors->text_secondary);
         
         // Заполнение батареи
-        uint16_t barColor = (percentage >= 20) ? _currentThemeColors->accent_primary : _currentThemeColors->error_color;
-        int barWidth = map(percentage, 0, 100, 0, batteryWidth - 4);
+        int displayPct = percentage;
+        if (isCharging) {
+            unsigned long elapsed = millis() - _chargingAnimStartTime;
+            int progress = (elapsed % 1500) * 100 / 1500;
+            displayPct = (100 * progress) / 100;
+        }
+        
+        uint16_t barColor;
+        if (displayPct > 50) barColor = _currentThemeColors->accent_primary;
+        else if (displayPct > 20) barColor = _currentThemeColors->accent_secondary;
+        else barColor = _currentThemeColors->error_color;
+        
+        tft.fillRect(batteryX + 2, batteryY + 2, batteryWidth - 4, batteryHeight - 4,
+                     _currentThemeColors->background_dark);
+        
+        int barWidth = map(displayPct, 0, 100, 0, batteryWidth - 4);
         if (barWidth > 0) {
             tft.fillRect(batteryX + 2, batteryY + 2, barWidth, batteryHeight - 4, barColor);
+        }
+        
+        if (isCharging) {
+            int bx = batteryX + batteryWidth / 2;
+            int by = batteryY + 1;
+            tft.drawPixel(bx + 1, by,     _currentThemeColors->text_primary);
+            tft.drawPixel(bx,     by + 1, _currentThemeColors->text_primary);
+            tft.drawPixel(bx + 1, by + 1, _currentThemeColors->text_primary);
+            tft.drawPixel(bx,     by + 2, _currentThemeColors->text_primary);
+            tft.drawPixel(bx + 1, by + 2, _currentThemeColors->text_primary);
+            tft.drawPixel(bx - 1, by + 3, _currentThemeColors->text_primary);
+            tft.drawPixel(bx,     by + 3, _currentThemeColors->text_primary);
         }
     }
 }
@@ -251,6 +280,53 @@ void DisplayManager::updateHeader() {
     
     // 🚫 Не отрисовываем заголовок на странице "No keys found" - шторка загораживает обводку!
     if (_isNoItemsPageActive) {
+        if (_headerState == HeaderState::CHARGING) {
+            unsigned long elapsed = millis() - _chargingAnimStartTime;
+            int progress = (elapsed % 1500) * 100 / 1500;
+            const int BW = 22, BH = 12, CR = 3, SO = 1;
+            const int SX = 2, SY = 2; // sprite internal offset
+            
+            batterySprite.fillSprite(_currentThemeColors->background_dark);
+            
+            // shadow
+            batterySprite.drawRoundRect(SX + SO, SY + SO, BW, BH, CR,
+                                        _currentThemeColors->shadow_color);
+            batterySprite.fillRect(SX + BW + SO, SY + 3 + SO, 2, 5,
+                                   _currentThemeColors->shadow_color);
+            
+            // outline
+            batterySprite.drawRoundRect(SX, SY, BW, BH, CR,
+                                        _currentThemeColors->text_secondary);
+            batterySprite.fillRect(SX + BW, SY + 3, 2, 5,
+                                   _currentThemeColors->text_secondary);
+            
+            // fill
+            batterySprite.fillRect(SX + 2, SY + 2, BW - 4, BH - 4,
+                                   _currentThemeColors->background_dark);
+            
+            uint16_t barColor;
+            if (progress > 50) barColor = _currentThemeColors->accent_primary;
+            else if (progress > 20) barColor = _currentThemeColors->accent_secondary;
+            else barColor = _currentThemeColors->error_color;
+            
+            int barWidth = map(progress, 0, 100, 0, BW - 4);
+            if (barWidth > 0) {
+                batterySprite.fillRect(SX + 2, SY + 2, barWidth, BH - 4, barColor);
+            }
+            
+            // lightning bolt
+            int bx = SX + BW / 2;
+            int by = SY + 1;
+            batterySprite.drawPixel(bx + 1, by,     _currentThemeColors->text_primary);
+            batterySprite.drawPixel(bx,     by + 1, _currentThemeColors->text_primary);
+            batterySprite.drawPixel(bx + 1, by + 1, _currentThemeColors->text_primary);
+            batterySprite.drawPixel(bx,     by + 2, _currentThemeColors->text_primary);
+            batterySprite.drawPixel(bx + 1, by + 2, _currentThemeColors->text_primary);
+            batterySprite.drawPixel(bx - 1, by + 3, _currentThemeColors->text_primary);
+            batterySprite.drawPixel(bx,     by + 3, _currentThemeColors->text_primary);
+            
+            batterySprite.pushSprite((int)tft.width() - 28 - SX, 5 - SY);
+        }
         return;
     }
     
@@ -278,15 +354,6 @@ void DisplayManager::updateHeader() {
     headerSprite.setTextColor(_currentThemeColors->text_primary, _currentThemeColors->background_dark);
     headerSprite.setTextSize(2);
     headerSprite.drawString(_currentServiceName, headerSprite.width() / 2, (int)titleY);
-
-    // Draw WiFi Icon
-    if (_isWebServerOn) {
-        int wifiX = headerSprite.width() - 55;
-        int wifiY = 10;
-        headerSprite.drawLine(wifiX, wifiY + 8, wifiX + 8, wifiY, _currentThemeColors->text_secondary);
-        headerSprite.drawLine(wifiX + 1, wifiY + 8, wifiX + 8, wifiY + 1, _currentThemeColors->text_secondary);
-        headerSprite.drawCircle(wifiX + 4, wifiY + 10, 2, _currentThemeColors->text_secondary);
-    }
 
     if (_headerState == HeaderState::CHARGING) {
         unsigned long chargeElapsedTime = millis() - _chargingAnimStartTime;
@@ -418,13 +485,45 @@ void DisplayManager::drawBatteryOnSprite(int percentage, bool isCharging, int ch
     uint16_t barColor;
     int barWidth;
 
+    // Determine bar color
     if (percentage > 50) barColor = _currentThemeColors->accent_primary;
     else if (percentage > 20) barColor = _currentThemeColors->accent_secondary;
     else barColor = _currentThemeColors->error_color;
-    barWidth = map(percentage, 0, 100, 0, width - 4);
 
+    // Calculate bar width
+    // When charging: animate from current percentage up to 100% using chargingValue (0-100 cycle)
+    int displayPercentage;
+    if (isCharging && chargingValue >= 0) {
+        // Animate fill level from real percentage toward 100%
+        int remaining = 100 - percentage;
+        displayPercentage = percentage + (remaining * chargingValue / 100);
+        barColor = _currentThemeColors->accent_primary;  // Always green when charging
+    } else {
+        displayPercentage = percentage;
+    }
+    
+    barWidth = map(displayPercentage, 0, 100, 0, width - 4);
+    if (barWidth < 0) barWidth = 0;
+
+    // Clear fill area first (avoid ghost pixels)
+    headerSprite.fillRect(x + 2, y + 2, width - 4, height - 4, _currentThemeColors->background_dark);
+
+    // Draw fill bar
     if (barWidth > 0) {
         headerSprite.fillRect(x + 2, y + 2, barWidth, height - 4, barColor);
+    }
+
+    // Draw charging indicator: small lightning bolt pixel pattern
+    if (isCharging) {
+        int bx = x + width / 2;
+        int by = y + 2;
+        headerSprite.drawPixel(bx + 1, by,     _currentThemeColors->text_primary);
+        headerSprite.drawPixel(bx,     by + 1, _currentThemeColors->text_primary);
+        headerSprite.drawPixel(bx + 1, by + 2, _currentThemeColors->text_primary);
+        headerSprite.drawPixel(bx,     by + 3, _currentThemeColors->text_primary);
+        headerSprite.drawPixel(bx + 1, by + 4, _currentThemeColors->text_primary);
+        headerSprite.drawPixel(bx,     by + 5, _currentThemeColors->text_primary);
+        headerSprite.drawPixel(bx + 1, by + 6, _currentThemeColors->text_primary);
     }
 }
 
@@ -582,8 +681,16 @@ void DisplayManager::showMessage(const String& text, int x, int y, bool isError,
     tft.setTextColor(_currentThemeColors->text_primary, _currentThemeColors->background_dark);
 }
 
-void DisplayManager::turnOff() { ledcWrite(0, 0); }
-void DisplayManager::turnOn() { ledcWrite(0, 255); }
+void DisplayManager::turnOff() {
+  ledcWrite(0, 0);
+  tft.writecommand(0x10); // TFT_SLPIN — stops internal oscillator (~5mA saved)
+}
+
+void DisplayManager::turnOn() {
+  tft.writecommand(0x11); // TFT_SLPOUT — restart internal oscillator
+  delay(120);             // ST7789 requires 120ms after SLPOUT before commands
+  ledcWrite(0, 255);
+}
 void DisplayManager::setBrightness(uint8_t brightness) { ledcWrite(0, brightness); }
 
 // 🔄 Обновление текста без полной перерисовки экрана
@@ -694,56 +801,81 @@ bool DisplayManager::promptWebServerSelection() {
 }
 
 // 🌌 Промптинг выбора режима запуска (AP/Offline/WiFi)
-StartupMode DisplayManager::promptModeSelection() {
+StartupMode DisplayManager::promptModeSelection(StartupMode defaultMode) {
+    // Определяем две кнопки — режимы, которые НЕ являются дефолтом
+    StartupMode leftMode, rightMode;
+    if (defaultMode == StartupMode::WIFI_MODE) {
+        leftMode = StartupMode::AP_MODE;
+        rightMode = StartupMode::OFFLINE_MODE;
+    } else if (defaultMode == StartupMode::AP_MODE) {
+        leftMode = StartupMode::WIFI_MODE;
+        rightMode = StartupMode::OFFLINE_MODE;
+    } else {
+        leftMode = StartupMode::WIFI_MODE;
+        rightMode = StartupMode::AP_MODE;
+    }
+
+    auto modeLabel = [](StartupMode m) -> const char* {
+        if (m == StartupMode::AP_MODE) return "AP";
+        if (m == StartupMode::OFFLINE_MODE) return "Offline";
+        return "WiFi";
+    };
+
+    auto defaultSubtitle = [](StartupMode m) -> const char* {
+        if (m == StartupMode::AP_MODE) return "Auto: AP Mode (default)";
+        if (m == StartupMode::OFFLINE_MODE) return "Auto: Offline Mode (default)";
+        return "Auto: WiFi Mode (default)";
+    };
+
     tft.fillScreen(_currentThemeColors->background_dark);
     tft.setTextColor(_currentThemeColors->text_primary);
     tft.setTextDatum(MC_DATUM);
     tft.setTextSize(2);
     tft.drawString("Select Mode", tft.width() / 2, 20);
     
-    // Подзаголовок с подсказкой
+    // Подзаголовок с подсказкой — динамически показывает дефолтный режим
     tft.setTextSize(1);
     tft.setTextColor(_currentThemeColors->text_secondary);
-    tft.drawString("Auto: WiFi Mode (default)", tft.width() / 2, 45);
+    tft.drawString(defaultSubtitle(defaultMode), tft.width() / 2, 45);
 
-    bool selection = true; // true для AP, false для Offline
+    bool selection = true; // true = левая кнопка (leftMode), false = правая (rightMode)
     
     auto drawButtons = [&](bool currentSelection) {
         int btnWidth = 80;
         int btnHeight = 40;
         int btnY = tft.height() / 2 + 10;
-        int apX = tft.width() / 2 - btnWidth - 10;
-        int offlineX = tft.width() / 2 + 10;
+        int leftX = tft.width() / 2 - btnWidth - 10;
+        int rightX = tft.width() / 2 + 10;
 
         // Очистка области кнопок
-        tft.fillRect(apX - 2, btnY - 2, btnWidth + 4, btnHeight + 4, _currentThemeColors->background_dark);
-        tft.fillRect(offlineX - 2, btnY - 2, btnWidth + 4, btnHeight + 4, _currentThemeColors->background_dark);
+        tft.fillRect(leftX - 2, btnY - 2, btnWidth + 4, btnHeight + 4, _currentThemeColors->background_dark);
+        tft.fillRect(rightX - 2, btnY - 2, btnWidth + 4, btnHeight + 4, _currentThemeColors->background_dark);
 
-        // 🔘 Кнопка "AP"
+        // 🔘 Левая кнопка
         if (currentSelection) {
-            tft.fillRoundRect(apX, btnY, btnWidth, btnHeight, 8, _currentThemeColors->accent_primary);
+            tft.fillRoundRect(leftX, btnY, btnWidth, btnHeight, 8, _currentThemeColors->accent_primary);
             tft.setTextColor(_currentThemeColors->background_dark);
         } else {
-            tft.fillRoundRect(apX, btnY, btnWidth, btnHeight, 8, _currentThemeColors->background_dark);
-            tft.drawRoundRect(apX, btnY, btnWidth, btnHeight, 8, _currentThemeColors->text_secondary);
+            tft.fillRoundRect(leftX, btnY, btnWidth, btnHeight, 8, _currentThemeColors->background_dark);
+            tft.drawRoundRect(leftX, btnY, btnWidth, btnHeight, 8, _currentThemeColors->text_secondary);
             tft.setTextColor(_currentThemeColors->text_secondary);
         }
         tft.setTextDatum(MC_DATUM);
-        tft.setTextSize(2);
-        tft.drawString("AP", apX + btnWidth/2, btnY + btnHeight/2);
+        tft.setTextSize(leftMode == StartupMode::OFFLINE_MODE ? 1 : 2);
+        tft.drawString(modeLabel(leftMode), leftX + btnWidth/2, btnY + btnHeight/2);
 
-        // 🔘 Кнопка "Offline"
+        // 🔘 Правая кнопка
         if (!currentSelection) {
-            tft.fillRoundRect(offlineX, btnY, btnWidth, btnHeight, 8, _currentThemeColors->accent_primary);
+            tft.fillRoundRect(rightX, btnY, btnWidth, btnHeight, 8, _currentThemeColors->accent_primary);
             tft.setTextColor(_currentThemeColors->background_dark);
         } else {
-            tft.fillRoundRect(offlineX, btnY, btnWidth, btnHeight, 8, _currentThemeColors->background_dark);
-            tft.drawRoundRect(offlineX, btnY, btnWidth, btnHeight, 8, _currentThemeColors->text_secondary);
+            tft.fillRoundRect(rightX, btnY, btnWidth, btnHeight, 8, _currentThemeColors->background_dark);
+            tft.drawRoundRect(rightX, btnY, btnWidth, btnHeight, 8, _currentThemeColors->text_secondary);
             tft.setTextColor(_currentThemeColors->text_secondary);
         }
         tft.setTextDatum(MC_DATUM);
-        tft.setTextSize(1);
-        tft.drawString("Offline", offlineX + btnWidth/2, btnY + btnHeight/2);
+        tft.setTextSize(rightMode == StartupMode::OFFLINE_MODE ? 1 : 2);
+        tft.drawString(modeLabel(rightMode), rightX + btnWidth/2, btnY + btnHeight/2);
         
         // Сброс цвета текста
         tft.setTextColor(_currentThemeColors->text_primary);
@@ -755,7 +887,7 @@ StartupMode DisplayManager::promptModeSelection() {
     const unsigned long timeout = 2000; // 2 секунды таймаут
 
     while (millis() - startTime < timeout) {
-        // Button 1 (GPIO 35) - переключение между AP/Offline
+        // Button 1 (GPIO 35) - переключение между двумя не-дефолтными режимами
         if (digitalRead(BUTTON_1) == LOW) {
             selection = !selection;
             drawButtons(selection);
@@ -769,18 +901,17 @@ StartupMode DisplayManager::promptModeSelection() {
             
             // 🧹 Очистка экрана перед переходом к выбранному режиму
             tft.fillScreen(_currentThemeColors->background_dark);
-            delay(50); // Даем дисплею время на обновление
+            delay(50);
             
-            return selection ? StartupMode::AP_MODE : StartupMode::OFFLINE_MODE;
+            return selection ? leftMode : rightMode;
         }
         delay(50);
     }
 
-    // 🧹 КРИТИЧНО: Очистка экрана после таймаута перед WiFi Mode
-    // Без этого текст "Connecting WiFi..." рисуется ПОВЕРХ промптинга!
+    // 🧹 Очистка экрана после таймаута
     tft.fillScreen(_currentThemeColors->background_dark);
     
-    return StartupMode::WIFI_MODE; // По умолчанию WiFi Mode после таймаута
+    return defaultMode; // По умолчанию — выбранный пользователем boot mode
 }
 
 void DisplayManager::drawPasswordLayout(const String& name, const String& password, int batteryPercentage, bool isCharging, bool isWebServerOn) {
@@ -852,8 +983,8 @@ void DisplayManager::drawHOTPLoader(int progress) {
     int barCornerRadius = 5;
 
     if (needsFullRedraw) {
-        // Clear area
-        tft.fillRect(barX - shadowOffset, barY - shadowOffset, barWidth + 40 + shadowOffset, barHeight + shadowOffset * 2, _currentThemeColors->background_dark);
+        // Clear full width to erase "HOTP - Static Code" text
+        tft.fillRect(0, barY - 10, tft.width(), 40, _currentThemeColors->background_dark);
 
         // Draw shadow, border, background
         tft.fillRoundRect(barX + shadowOffset, barY + shadowOffset, barWidth, barHeight, barCornerRadius, _currentThemeColors->shadow_color);
@@ -949,6 +1080,7 @@ void DisplayManager::eraseLoaderArea() {
     _loaderActive = false;
     _lastLoaderText = "";
     _lastLoaderProgress = -1;
+    lastTimeRemaining = -999; // Force redraw of HOTP/TOTP area on next updateTOTPCode call
     // Clear only the loader bar area at bottom of screen
     int barY = tft.height() - 30;
     tft.fillRect(0, barY - 10, tft.width(), 40, _currentThemeColors->background_dark);
@@ -1079,15 +1211,6 @@ void DisplayManager::drawNoItemsPage(const String& text) {
         tft.fillRect(batteryX + 2, batteryY + 2, barWidth, batteryHeight - 4, barColor);
     }
     
-    // 📡 Рисуем WiFi иконку если веб-сервер включен
-    if (_isWebServerOn) {
-        int wifiX = tft.width() - 55;
-        int wifiY = 10;
-        tft.drawLine(wifiX, wifiY + 8, wifiX + 8, wifiY, _currentThemeColors->text_secondary);
-        tft.drawLine(wifiX + 1, wifiY + 8, wifiX + 8, wifiY + 1, _currentThemeColors->text_secondary);
-        tft.fillCircle(wifiX + 4, wifiY + 10, 2, _currentThemeColors->text_secondary);
-    }
-
     // 🕐 Часы в левом верхнем углу (прямо в tft, не спрайт)
     {
         struct tm timeinfo;
@@ -1227,6 +1350,9 @@ void DisplayManager::hideQRCode() {
     if (_qrCodeActive) {
         LOG_INFO("DisplayManager", "Hiding QR code");
         _qrCodeActive = false;
+        if (_isCharging) {
+            _chargingAnimStartTime = millis();
+        }
         _qrCodeTimeout = 0;
         _lastQRTimerSeconds = -1;
         

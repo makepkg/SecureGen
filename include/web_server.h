@@ -11,6 +11,7 @@
 #include "log_manager.h"
 #include "totp_generator.h"
 #include "wifi_manager.h"
+#include "battery_manager.h"
 
 #ifdef SECURE_LAYER_ENABLED
 #include "secure_layer_manager.h"
@@ -34,6 +35,7 @@ public:
     bool isRunning();
     void setBleKeyboardManager(BleKeyboardManager* bleManager);
     void setWifiManager(WifiManager* wifiManager);
+    void setBatteryManager(BatteryManager* manager);
     void clearSession(); // Очистка сессии и CSRF токена
 
 private:
@@ -68,6 +70,7 @@ private:
     TOTPGenerator& totpGenerator;
     BleKeyboardManager* bleKeyboardManager = nullptr;
     WifiManager* wifiManager = nullptr;
+    BatteryManager* batteryManager = nullptr;
 
 #ifdef SECURE_LAYER_ENABLED
     SecureLayerManager& secureLayer = SecureLayerManager::getInstance();

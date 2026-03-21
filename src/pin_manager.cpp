@@ -207,6 +207,7 @@ String PinManager::requestPinInput(const String& title, bool isConfirmScreen) {
                         delay(100);
                         // 3. Уходим в deep sleep
                         secureShutdown();
+                        esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
                         esp_deep_sleep_start(); // Уходим в deep sleep до нажатия RST
                     }
                 }

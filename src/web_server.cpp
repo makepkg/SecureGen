@@ -17,6 +17,8 @@
 #include "web_pages/page_wifi_setup.h"
 #include "web_pages/page_splash.h"
 #include "ble_keyboard_manager.h"
+#include "rtc_manager.h"
+extern RTCManager rtcManager;
 
 #ifdef SECURE_LAYER_ENABLED
 #include "web_server_secure_integration.h"
@@ -58,6 +60,10 @@ void WebServerManager::setBleKeyboardManager(BleKeyboardManager* bleManager) {
 
 void WebServerManager::setWifiManager(WifiManager* manager) {
     wifiManager = manager;
+}
+
+void WebServerManager::setBatteryManager(BatteryManager* manager) {
+    batteryManager = manager;
 }
 
 bool WebServerManager::isAuthenticated(AsyncWebServerRequest *request) {
@@ -1117,13 +1123,7 @@ void WebServerManager::start() {
             auto keys = keyManager.getAllKeys();
             
             // 🔐 Блокировка TOTP в AP/Offline режимах
-            wifi_mode_t wifiMode = WiFi.getMode();
-            bool blockTOTP;
-            if (wifiMode == WIFI_AP || wifiMode == WIFI_AP_STA || wifiMode == WIFI_OFF) {
-                blockTOTP = true;
-            } else {
-                blockTOTP = !totpGenerator.isTimeSynced();
-            }
+            bool blockTOTP = !totpGenerator.isTimeSynced();
             
             for (size_t i = 0; i < keys.size(); i++) {
                 JsonObject keyObj = keysArray.add<JsonObject>();
@@ -2763,6 +2763,58 @@ void WebServerManager::start() {
             }
         });
 
+    server.on("/api/wifi_credentials", HTTP_POST,
+        [this](AsyncWebServerRequest *request){
+            // Main handler — always sends response
+            if (!isAuthenticated(request)) return request->send(401);
+            if (!verifyCsrfToken(request)) return request->send(403);
+            
+            auto* parsed = (JsonDocument*)request->_tempObject;
+            if (!parsed) {
+                return request->send(400, "application/json",
+                    "{\"success\":false,\"message\":\"No body\"}");
+            }
+            
+            String ssid = (*parsed)["ssid"].as<String>();
+            String password = (*parsed)["password"].as<String>();
+            String confirm = (*parsed)["confirm_password"].as<String>();
+            
+            delete parsed; request->_tempObject = nullptr;
+            
+            if (ssid.length() == 0) {
+                return request->send(400, "application/json",
+                    "{\"success\":false,\"message\":\"SSID is required\"}");
+            }
+            if (password != confirm) {
+                return request->send(400, "application/json",
+                    "{\"success\":false,\"message\":\"Passwords do not match\"}");
+            }
+            if (password.length() > 0 && password.length() < 8) {
+                return request->send(400, "application/json",
+                    "{\"success\":false,\"message\":\"Password must be at least 8 characters\"}");
+            }
+            
+            if (wifiManager && wifiManager->saveCredentials(ssid, password)) {
+                request->send(200, "application/json",
+                    "{\"success\":true,\"message\":\"WiFi credentials saved. Reboot to apply.\"}");
+            } else {
+                request->send(500, "application/json",
+                    "{\"success\":false,\"message\":\"Failed to save WiFi credentials\"}");
+            }
+        },
+        NULL,
+        [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+            // Body handler — NEVER calls send()
+            if (index + len < total) return;
+            
+            JsonDocument* doc = new JsonDocument();
+            if (deserializeJson(*doc, data, len) == DeserializationError::Ok) {
+                request->_tempObject = doc;
+            } else {
+                delete doc;
+            }
+        });
+
     // API: Change WiFi AP password (POST with encryption)
     server.on("/api/change_ap_password", HTTP_POST,
         [this](AsyncWebServerRequest *request){
@@ -3466,6 +3518,7 @@ void WebServerManager::start() {
                             LittleFS.remove(WEB_ADMIN_FILE);
                             LittleFS.remove(MDNS_CONFIG_FILE);
                             LittleFS.remove(LOGIN_STATE_FILE);
+                            LittleFS.remove("/rtc_config.json");
                             LittleFS.remove("/ble_pin.json.enc");
                             LittleFS.remove("/session.json.enc");
                             
@@ -3802,6 +3855,155 @@ void WebServerManager::start() {
         server.on(obfuscatedBlePinUpdatePath.c_str(), HTTP_POST, blePinUpdateHandler, NULL, blePinUpdateBodyHandler);
     }
 
+    // DS3231 RTC endpoints
+    server.on("/api/rtc", HTTP_GET,[this](AsyncWebServerRequest *request){
+        if (!isAuthenticated(request)) return request->send(401);
+        if (!verifyCsrfToken(request)) return request->send(403);
+        RTCConfig cfg = rtcManager.getConfig();
+        JsonDocument doc;
+        doc["enabled"]        = cfg.enabled;
+        doc["sda_pin"]        = cfg.sda_pin;
+        doc["scl_pin"]        = cfg.scl_pin;
+        doc["available"]      = rtcManager.isAvailable();
+        doc["wifi_connected"] = (WiFi.status() == WL_CONNECTED);
+        if (rtcManager.isAvailable()) {
+            DateTime now = rtcManager.getCurrentTime();
+            char iso[25];
+            snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02d:%02d:%02dZ",
+                     now.year(), now.month(), now.day(),
+                     now.hour(), now.minute(), now.second());
+            doc["rtc_time"] = iso;
+        } else {
+            doc["rtc_time"] = nullptr;
+        }
+        String out; serializeJson(doc, out);
+        request->send(200, "application/json", out);
+    });
+
+    server.on("/api/rtc", HTTP_POST,[this](AsyncWebServerRequest *request){
+        if (!isAuthenticated(request)) return request->send(401);
+        if (!verifyCsrfToken(request)) return request->send(403);
+        auto* parsed = (JsonDocument*)request->_tempObject;
+        if (!parsed) return request->send(400, "text/plain", "No body");
+        RTCConfig cfg;
+        cfg.enabled = (*parsed)["enabled"] | false;
+        cfg.sda_pin = (*parsed)["sda_pin"]  | 21;
+        cfg.scl_pin = (*parsed)["scl_pin"]  | 22;
+        time_t ts   = (time_t)(long)(*parsed)["timestamp"];
+        delete parsed; request->_tempObject = nullptr;
+        rtcManager.saveConfig(cfg);
+        bool time_synced = false, available = false;
+        String message = "Config saved";
+        if (cfg.enabled) {
+            if (!rtcManager.isInitialized()) {
+                rtcManager.init();
+            } else if (cfg.sda_pin != rtcManager.getConfig().sda_pin ||
+                       cfg.scl_pin != rtcManager.getConfig().scl_pin) {
+                rtcManager.reinit();
+            }
+            available = rtcManager.isAvailable();
+            if (available && ts > 1609459200) {
+                struct timeval tv = { ts, 0 };
+                settimeofday(&tv, nullptr);
+                rtcManager.syncToRTC(ts);
+                time_synced = true;
+                message = "Config saved and time synchronized";
+            } else if (!available) {
+                message = "Config saved but DS3231 not found on I2C bus";
+            } else {
+                message = "Config saved but timestamp invalid";
+            }
+        }
+        JsonDocument resp;
+        resp["success"]     = true;
+        resp["time_synced"] = time_synced;
+        resp["available"]   = available;
+        resp["message"]     = message;
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    },NULL,[this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+        if (index + len < total) return;
+        JsonDocument* doc = new JsonDocument();
+        if (deserializeJson(*doc, data, len) == DeserializationError::Ok) {
+            request->_tempObject = doc;
+        } else { delete doc; }
+    });
+
+    server.on("/scan", HTTP_GET, [](AsyncWebServerRequest *request){
+        int n = WiFi.scanComplete();
+        if (n == WIFI_SCAN_RUNNING) {
+            request->send(202, "application/json", "[]");
+            return;
+        }
+        if (n == WIFI_SCAN_FAILED || n == 0) {
+            WiFi.scanNetworks(true);
+            request->send(200, "application/json", "[]");
+            return;
+        }
+        JsonDocument doc;
+        JsonArray array = doc.to<JsonArray>();
+        for (int i = 0; i < n; ++i) {
+            JsonObject net = array.add<JsonObject>();
+            net["ssid"] = WiFi.SSID(i);
+            net["rssi"] = WiFi.RSSI(i);
+        }
+        WiFi.scanDelete();
+        WiFi.scanNetworks(true);
+        String output;
+        serializeJson(doc, output);
+        request->send(200, "application/json", output);
+    });
+
+    server.on("/api/battery", HTTP_GET, [this](AsyncWebServerRequest *request){
+        if (!isAuthenticated(request)) return request->send(401);
+        if (!verifyCsrfToken(request)) return request->send(403);
+        if (!batteryManager) {
+            return request->send(503, "application/json", 
+                "{\"error\":\"Battery manager not available\"}");
+        }
+        JsonDocument doc;
+        doc["level"] = batteryManager->getPercentage();
+        doc["charging"] = (batteryManager->getVoltage() > 4.15f);
+        String out;
+        serializeJson(doc, out);
+        request->send(200, "application/json", out);
+    });
+
+    // Boot Mode endpoint
+    server.on("/api/boot-mode", HTTP_GET, [this](AsyncWebServerRequest *request){
+        if (!isAuthenticated(request)) return request->send(401);
+        if (!verifyCsrfToken(request)) return request->send(403);
+        String mode = configManager.getBootMode();
+        JsonDocument resp;
+        resp["boot_mode"] = mode;
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    });
+
+    server.on("/api/boot-mode", HTTP_POST,[this](AsyncWebServerRequest *request){
+        if (!isAuthenticated(request)) return request->send(401);
+        if (!verifyCsrfToken(request)) return request->send(403);
+        auto* parsed = (JsonDocument*)request->_tempObject;
+        if (!parsed) return request->send(400, "text/plain", "No body");
+        String mode = (*parsed)["boot_mode"] | "wifi";
+        delete parsed; request->_tempObject = nullptr;
+        if (mode != "wifi" && mode != "ap" && mode != "offline") {
+            return request->send(400, "application/json", "{\"error\":\"Invalid boot_mode\"}");
+        }
+        bool ok = configManager.saveBootMode(mode);
+        JsonDocument resp;
+        resp["success"] = ok;
+        resp["boot_mode"] = mode;
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    },NULL,[this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+        if (index + len < total) return;
+        JsonDocument* doc = new JsonDocument();
+        if (deserializeJson(*doc, data, len) == DeserializationError::Ok) {
+            request->_tempObject = doc;
+        } else { delete doc; }
+    });
+
     // Clock Settings endpoints
     server.on("/api/clock_settings", HTTP_GET, [this](AsyncWebServerRequest *request){
         if (!isAuthenticated(request)) return request->send(401);
@@ -3867,8 +4069,10 @@ void WebServerManager::start() {
         if (!isAuthenticated(request)) return request->send(401);
         
         uint16_t displayTimeout = configManager.getDisplayTimeout();
+        uint32_t autoLockTimeout = configManager.getAutoLockTimeout();
         JsonDocument doc;
         doc["display_timeout"] = displayTimeout;
+        doc["auto_lock_timeout"] = autoLockTimeout;
         String output;
         serializeJson(doc, output);
         
@@ -3950,28 +4154,73 @@ void WebServerManager::start() {
                 
                 uint16_t timeout = timeoutStr.toInt();
                 
-                // Validate timeout values
+                // Validate screen timeout values
                 if (timeout != 0 && timeout != 15 && timeout != 30 && timeout != 60 && 
                     timeout != 300 && timeout != 1800) {
                     return request->send(400, "text/plain", "Invalid timeout value!");
                 }
                 
-                // Сохранение таймаута
+                // Parse and validate auto_lock_timeout
+                String autoLockStr;
+#ifdef SECURE_LAYER_ENABLED
+                {
+                    String clientIdAl = WebServerSecureIntegration::getClientId(request);
+                    if (clientIdAl.length() > 0 && secureLayer.isSecureSessionValid(clientIdAl) &&
+                        (request->hasHeader("X-Secure-Request") || request->hasHeader("X-Security-Level"))) {
+                        // already decrypted into timeoutStr path above — re-parse for auto_lock
+                        String encBody2 = String((char*)data, len);
+                        String decBody2;
+                        if (secureLayer.decryptRequest(clientIdAl, encBody2, decBody2)) {
+                            int alStart = decBody2.indexOf("auto_lock_timeout=");
+                            if (alStart >= 0) {
+                                int alEnd = decBody2.indexOf("&", alStart);
+                                if (alEnd < 0) alEnd = decBody2.length();
+                                autoLockStr = urlDecode(decBody2.substring(alStart + 18, alEnd));
+                            }
+                        }
+                    } else {
+                        if (request->hasParam("auto_lock_timeout", true))
+                            autoLockStr = request->getParam("auto_lock_timeout", true)->value();
+                    }
+                }
+#else
+                if (request->hasParam("auto_lock_timeout", true))
+                    autoLockStr = request->getParam("auto_lock_timeout", true)->value();
+#endif
+                
+                uint32_t autoLockTimeout = autoLockStr.length() > 0 ? (uint32_t)autoLockStr.toInt() : configManager.getAutoLockTimeout();
+                
+                // Validate auto_lock_timeout values
+                if (autoLockTimeout != 0 && autoLockTimeout != 300 && autoLockTimeout != 900 &&
+                    autoLockTimeout != 1800 && autoLockTimeout != 3600 && autoLockTimeout != 14400) {
+                    return request->send(400, "text/plain", "Invalid auto lock timeout value!");
+                }
+                
+                // Cross-validation: auto lock must be > screen timeout (when both non-zero)
+                if (timeout > 0 && autoLockTimeout > 0 && autoLockTimeout <= timeout) {
+                    return request->send(400, "text/plain", "Auto lock timeout must be greater than screen timeout!");
+                }
+                
+                // Сохранение таймаутов
                 String response;
                 int statusCode;
                 
                 JsonDocument doc;
-                if (configManager.saveDisplayTimeout(timeout)) {
+                bool screenSaved = configManager.saveDisplayTimeout(timeout);
+                bool autoLockSaved = configManager.saveAutoLockTimeout(autoLockTimeout);
+                
+                if (screenSaved && autoLockSaved) {
                     doc["success"] = true;
-                    doc["message"] = "Display timeout saved successfully!";
+                    doc["message"] = "Display settings saved successfully!";
                     doc["timeout"] = timeout;
+                    doc["auto_lock_timeout"] = autoLockTimeout;
                     statusCode = 200;
-                    LOG_INFO("WebServer", "Display timeout changed to: " + String(timeout) + " seconds");
+                    LOG_INFO("WebServer", "Display timeout changed to: " + String(timeout) + "s, auto lock: " + String(autoLockTimeout) + "s");
                 } else {
                     doc["success"] = false;
-                    doc["message"] = "Failed to save display timeout!";
+                    doc["message"] = "Failed to save display settings!";
                     statusCode = 500;
-                    LOG_ERROR("WebServer", "Failed to save display timeout");
+                    LOG_ERROR("WebServer", "Failed to save display settings");
                 }
                 
                 serializeJson(doc, response);
@@ -4102,7 +4351,9 @@ void WebServerManager::start() {
                 // Применение темы
                 Theme newTheme = (theme == "light") ? Theme::LIGHT : Theme::DARK;
                 configManager.saveTheme(newTheme);
-                displayManager.setTheme(newTheme);
+                
+                extern bool pendingThemeChange; extern Theme pendingTheme;
+                pendingThemeChange = true; pendingTheme = newTheme;
                 
                 LOG_INFO("WebServer", "Theme changed to: " + theme);
                 
@@ -4838,14 +5089,7 @@ void WebServerManager::start() {
                     auto keys = keyManager.getAllKeys();
                     
                     // 🔐 Блокировка TOTP в AP/Offline режимах
-                    wifi_mode_t wifiMode = WiFi.getMode();
-                    bool blockTOTP;
-                    if (wifiMode == WIFI_AP || wifiMode == WIFI_AP_STA || wifiMode == WIFI_OFF) {
-                        blockTOTP = true;
-                        Serial.println("[DEBUG TUNNEL2] TOTP BLOCKED - AP/Offline mode");
-                    } else {
-                        blockTOTP = !totpGenerator.isTimeSynced();
-                    }
+                    bool blockTOTP = !totpGenerator.isTimeSynced();
                     
                     for (size_t i = 0; i < keys.size(); i++) {
                         JsonObject keyObj = keysArray.add<JsonObject>();
@@ -5445,6 +5689,45 @@ void WebServerManager::start() {
                     }
                 }
                 
+                // 🎯 МАРШРУТИЗАЦИЯ: /api/passwords/reorder POST
+                if (targetEndpoint == "/api/passwords/reorder" && targetMethod == "POST") {
+                    if (request->hasHeader("X-User-Activity")) {
+                        resetActivityTimer();
+                    }
+                    
+                    if (!targetData["order"].is<JsonArray>()) {
+                        return request->send(400, "text/plain", "Missing or invalid 'order' field");
+                    }
+                    
+                    std::vector<std::pair<String, int>> newOrder;
+                    JsonArray orderArray = targetData["order"].as<JsonArray>();
+                    
+                    for (JsonObject item : orderArray) {
+                        String name = item["name"].as<String>();
+                        int order = item["order"].as<int>();
+                        newOrder.push_back(std::make_pair(name, order));
+                    }
+                    
+                    LOG_INFO("WebServer", "🚇 TUNNELED Passwords reorder: " + String(newOrder.size()) + " passwords");
+                    bool success = passwordManager.reorderPasswords(newOrder);
+                    
+                    String output;
+                    int statusCode;
+                    if (success) {
+                        output = "{\"status\":\"success\",\"message\":\"Passwords reordered successfully!\"}";
+                        statusCode = 200;
+                        LOG_INFO("WebServer", "🚇 Passwords reordered successfully");
+                    } else {
+                        output = "{\"status\":\"error\",\"message\":\"Failed to reorder passwords\"}";
+                        statusCode = 500;
+                        LOG_ERROR("WebServer", "🚇 Failed to reorder passwords");
+                    }
+                    
+                    LOG_INFO("WebServer", "🔐 PASSWORDS REORDER ENCRYPTION: Securing tunneled response");
+                    WebServerSecureIntegration::sendSecureResponse(request, statusCode, "application/json", output, secureLayer);
+                    return;
+                }
+                
                 // 🎯 МАРШРУТИЗАЦИЯ: /api/theme GET
                 if (targetEndpoint == "/api/theme" && targetMethod == "GET") {
                     if (request->hasHeader("X-User-Activity")) {
@@ -5494,7 +5777,9 @@ void WebServerManager::start() {
                     
                     Theme newTheme = (theme == "light") ? Theme::LIGHT : Theme::DARK;
                     configManager.saveTheme(newTheme);
-                    displayManager.setTheme(newTheme);
+                    
+                    extern bool pendingThemeChange; extern Theme pendingTheme;
+                    pendingThemeChange = true; pendingTheme = newTheme;
                     
                     LOG_INFO("WebServer", "🚇 TUNNELED theme changed to: " + theme);
                     
@@ -5517,14 +5802,106 @@ void WebServerManager::start() {
                     }
                     
                     uint16_t displayTimeout = configManager.getDisplayTimeout();
+                    uint32_t autoLockTimeout = configManager.getAutoLockTimeout();
                     JsonDocument doc;
                     doc["display_timeout"] = displayTimeout;
+                    doc["auto_lock_timeout"] = autoLockTimeout;
                     String output;
                     serializeJson(doc, output);
                     
-                    LOG_INFO("WebServer", "🚇 TUNNELED display_settings GET: timeout=" + String(displayTimeout));
+                    LOG_INFO("WebServer", "🚇 TUNNELED display_settings GET: timeout=" + String(displayTimeout) + " autoLock=" + String(autoLockTimeout));
                     LOG_INFO("WebServer", "🔐 DISPLAY_SETTINGS GET ENCRYPTION: Securing tunneled response [TUNNELED]");
                     WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
+                    return;
+                }
+                
+                // 🎯 МАРШРУТИЗАЦИЯ: /api/rtc GET
+                if (targetEndpoint == "/api/rtc" && targetMethod == "GET") {
+                    RTCConfig cfg = rtcManager.getConfig();
+                    JsonDocument doc;
+                    doc["enabled"]        = cfg.enabled;
+                    doc["sda_pin"]        = cfg.sda_pin;
+                    doc["scl_pin"]        = cfg.scl_pin;
+                    doc["available"]      = rtcManager.isAvailable();
+                    doc["wifi_connected"] = (WiFi.status() == WL_CONNECTED);
+                    if (rtcManager.isAvailable()) {
+                        DateTime now = rtcManager.getCurrentTime();
+                        char iso[25];
+                        snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02d:%02d:%02dZ",
+                                 now.year(), now.month(), now.day(),
+                                 now.hour(), now.minute(), now.second());
+                        doc["rtc_time"] = iso;
+                    } else {
+                        doc["rtc_time"] = nullptr;
+                    }
+                    String out; serializeJson(doc, out);
+                    WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", out, secureLayer);
+                    return;
+                }
+                
+                // 🎯 МАРШРУТИЗАЦИЯ: /api/rtc POST
+                if (targetEndpoint == "/api/rtc" && targetMethod == "POST") {
+                    RTCConfig cfg;
+                    cfg.enabled = targetData["enabled"] | false;
+                    cfg.sda_pin = targetData["sda_pin"]  | 21;
+                    cfg.scl_pin = targetData["scl_pin"]  | 22;
+                    time_t ts   = (time_t)(long)targetData["timestamp"];
+                    rtcManager.saveConfig(cfg);
+                    bool time_synced = false, available = false;
+                    String message = "Config saved";
+                    if (cfg.enabled) {
+                        if (!rtcManager.isInitialized()) {
+                            rtcManager.init();
+                        } else if (cfg.sda_pin != rtcManager.getConfig().sda_pin ||
+                                   cfg.scl_pin != rtcManager.getConfig().scl_pin) {
+                            rtcManager.reinit();
+                        }
+                        available = rtcManager.isAvailable();
+                        if (available && ts > 1609459200) {
+                            struct timeval tv = { ts, 0 };
+                            settimeofday(&tv, nullptr);
+                            rtcManager.syncToRTC(ts);
+                            time_synced = true;
+                            message = "Config saved and time synchronized";
+                        } else if (!available) {
+                            message = "Config saved but DS3231 not found on I2C bus";
+                        } else {
+                            message = "Config saved but timestamp invalid";
+                        }
+                    }
+                    JsonDocument resp;
+                    resp["success"]     = true;
+                    resp["time_synced"] = time_synced;
+                    resp["available"]   = available;
+                    resp["message"]     = message;
+                    String out; serializeJson(resp, out);
+                    WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", out, secureLayer);
+                    return;
+                }
+                
+                // 🎯 МАРШРУТИЗАЦИЯ: /api/boot-mode GET
+                if (targetEndpoint == "/api/boot-mode" && targetMethod == "GET") {
+                    String mode = configManager.getBootMode();
+                    JsonDocument resp;
+                    resp["boot_mode"] = mode;
+                    String out; serializeJson(resp, out);
+                    WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", out, secureLayer);
+                    return;
+                }
+                
+                // 🎯 МАРШРУТИЗАЦИЯ: /api/boot-mode POST
+                if (targetEndpoint == "/api/boot-mode" && targetMethod == "POST") {
+                    String mode = targetData["boot_mode"] | "wifi";
+                    if (mode != "wifi" && mode != "ap" && mode != "offline") {
+                        WebServerSecureIntegration::sendSecureResponse(request, 400, "application/json", "{\"error\":\"Invalid boot_mode\"}", secureLayer);
+                        return;
+                    }
+                    bool ok = configManager.saveBootMode(mode);
+                    JsonDocument resp;
+                    resp["success"] = ok;
+                    resp["boot_mode"] = mode;
+                    String out; serializeJson(resp, out);
+                    WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", out, secureLayer);
                     return;
                 }
                 
@@ -5593,7 +5970,6 @@ void WebServerManager::start() {
                     
                     uint16_t timeout = timeoutStr.toInt();
                     
-                    // Validate timeout values
                     if (timeout != 0 && timeout != 15 && timeout != 30 && timeout != 60 && 
                         timeout != 300 && timeout != 1800) {
                         JsonDocument errorDoc;
@@ -5605,20 +5981,45 @@ void WebServerManager::start() {
                         return;
                     }
                     
+                    String autoLockStr = targetData["auto_lock_timeout"].as<String>();
+                    uint32_t autoLockTimeout = (autoLockStr.length() > 0 && autoLockStr != "null") ? (uint32_t)autoLockStr.toInt() : configManager.getAutoLockTimeout();
+                    
+                    if (autoLockTimeout != 0 && autoLockTimeout != 300 && autoLockTimeout != 900 &&
+                        autoLockTimeout != 1800 && autoLockTimeout != 3600 && autoLockTimeout != 14400) {
+                        JsonDocument errorDoc;
+                        errorDoc["success"] = false;
+                        errorDoc["message"] = "Invalid auto lock timeout value!";
+                        String errorResponse;
+                        serializeJson(errorDoc, errorResponse);
+                        WebServerSecureIntegration::sendSecureResponse(request, 400, "application/json", errorResponse, secureLayer);
+                        return;
+                    }
+                    
+                    if (timeout > 0 && autoLockTimeout > 0 && autoLockTimeout <= timeout) {
+                        JsonDocument errorDoc;
+                        errorDoc["success"] = false;
+                        errorDoc["message"] = "Auto lock timeout must be greater than screen timeout!";
+                        String errorResponse;
+                        serializeJson(errorDoc, errorResponse);
+                        WebServerSecureIntegration::sendSecureResponse(request, 400, "application/json", errorResponse, secureLayer);
+                        return;
+                    }
+                    
                     JsonDocument doc;
                     int statusCode;
                     
-                    if (configManager.saveDisplayTimeout(timeout)) {
+                    if (configManager.saveDisplayTimeout(timeout) && configManager.saveAutoLockTimeout(autoLockTimeout)) {
                         doc["success"] = true;
-                        doc["message"] = "Display timeout saved successfully!";
+                        doc["message"] = "Display settings saved successfully!";
                         doc["timeout"] = timeout;
+                        doc["auto_lock_timeout"] = autoLockTimeout;
                         statusCode = 200;
-                        LOG_INFO("WebServer", "🚇 TUNNELED display timeout changed to: " + String(timeout) + " seconds");
+                        LOG_INFO("WebServer", "🚇 TUNNELED display timeout=" + String(timeout) + "s autoLock=" + String(autoLockTimeout) + "s");
                     } else {
                         doc["success"] = false;
-                        doc["message"] = "Failed to save display timeout!";
+                        doc["message"] = "Failed to save display settings!";
                         statusCode = 500;
-                        LOG_ERROR("WebServer", "🚇 TUNNELED Failed to save display timeout");
+                        LOG_ERROR("WebServer", "🚇 TUNNELED Failed to save display settings");
                     }
                     
                     String response;
@@ -5739,6 +6140,7 @@ void WebServerManager::start() {
                                 LittleFS.remove(WEB_ADMIN_FILE);
                                 LittleFS.remove(MDNS_CONFIG_FILE);
                                 LittleFS.remove(LOGIN_STATE_FILE);
+                                LittleFS.remove("/rtc_config.json");
                                 LittleFS.remove("/ble_pin.json.enc");
                                 LittleFS.remove("/session.json.enc");
                                 
@@ -6221,6 +6623,43 @@ void WebServerManager::start() {
                     return;
                 }
                 
+                if (targetEndpoint == "/api/wifi_credentials" && targetMethod == "POST") {
+                    String ssid = targetData["ssid"].as<String>();
+                    String password = targetData["password"].as<String>();
+                    String confirm = targetData["confirm_password"].as<String>();
+                    
+                    if (ssid.length() == 0) {
+                        String out = "{\"success\":false,\"message\":\"SSID is required\"}";
+                        WebServerSecureIntegration::sendSecureResponse(request, 400,
+                            "application/json", out, secureLayer);
+                        return;
+                    }
+                    if (password != confirm) {
+                        String out = "{\"success\":false,\"message\":\"Passwords do not match\"}";
+                        WebServerSecureIntegration::sendSecureResponse(request, 400,
+                            "application/json", out, secureLayer);
+                        return;
+                    }
+                    if (password.length() > 0 && password.length() < 8) {
+                        String out = "{\"success\":false,\"message\":\"Password must be at least 8 characters\"}";
+                        WebServerSecureIntegration::sendSecureResponse(request, 400,
+                            "application/json", out, secureLayer);
+                        return;
+                    }
+                    
+                    String out;
+                    if (wifiManager && wifiManager->saveCredentials(ssid, password)) {
+                        out = "{\"success\":true,\"message\":\"WiFi credentials saved. Reboot to apply.\"}";
+                        WebServerSecureIntegration::sendSecureResponse(request, 200,
+                            "application/json", out, secureLayer);
+                    } else {
+                        out = "{\"success\":false,\"message\":\"Failed to save WiFi credentials\"}";
+                        WebServerSecureIntegration::sendSecureResponse(request, 500,
+                            "application/json", out, secureLayer);
+                    }
+                    return;
+                }
+                
                 // 🎯 МАРШРУТИЗАЦИЯ: /api/change_ap_password POST
                 if (targetEndpoint == "/api/change_ap_password" && targetMethod == "POST") {
                     LOG_INFO("WebServer", "🚇 TUNNELED change_ap_password request");
@@ -6281,6 +6720,23 @@ void WebServerManager::start() {
                     if (!isAuthenticated(request)) return request->send(401);
                     resetActivityTimer();
                     request->send(200, "application/json", "{\"status\":\"success\"}");
+                    return;
+                }
+                
+                if (targetEndpoint == "/api/battery" && targetMethod == "GET") {
+                    if (!batteryManager) {
+                        WebServerSecureIntegration::sendSecureResponse(request, 503, 
+                            "application/json", 
+                            "{\"error\":\"Battery manager not available\"}", secureLayer);
+                        return;
+                    }
+                    JsonDocument doc;
+                    doc["level"] = batteryManager->getPercentage();
+                    doc["charging"] = (batteryManager->getVoltage() > 4.15f);
+                    String out;
+                    serializeJson(doc, out);
+                    WebServerSecureIntegration::sendSecureResponse(request, 200, 
+                        "application/json", out, secureLayer);
                     return;
                 }
                 
@@ -6412,14 +6868,7 @@ void WebServerManager::start() {
                         auto keys = keyManager.getAllKeys();
                         
                         // 🔐 Блокировка TOTP в AP/Offline режимах
-                        wifi_mode_t wifiMode = WiFi.getMode();
-                        bool blockTOTP;
-                        if (wifiMode == WIFI_AP || wifiMode == WIFI_AP_STA || wifiMode == WIFI_OFF) {
-                            blockTOTP = true;
-                            Serial.println("[DEBUG TUNNEL] TOTP BLOCKED - AP/Offline mode");
-                        } else {
-                            blockTOTP = !totpGenerator.isTimeSynced();
-                        }
+                        bool blockTOTP = !totpGenerator.isTimeSynced();
                         
                         for (size_t i = 0; i < keys.size(); i++) {
                             JsonObject keyObj = keysArray.add<JsonObject>();
@@ -6786,10 +7235,13 @@ void WebServerManager::start() {
                     if (targetEndpoint == "/api/display_settings" && targetMethod == "GET") {
                         if (request->hasHeader("X-User-Activity")) resetActivityTimer();
                         uint16_t displayTimeout = configManager.getDisplayTimeout();
+                        uint32_t autoLockTimeout = configManager.getAutoLockTimeout();
                         String output;
-                        output.reserve(40);
+                        output.reserve(60);
                         output = "{\"display_timeout\":";
                         output += String(displayTimeout);
+                        output += ",\"auto_lock_timeout\":";
+                        output += String(autoLockTimeout);
                         output += "}";
                         WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
                         if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
@@ -6980,7 +7432,9 @@ void WebServerManager::start() {
                         
                         Theme newTheme = (theme == "light") ? Theme::LIGHT : Theme::DARK;
                         configManager.saveTheme(newTheme);
-                        displayManager.setTheme(newTheme);
+                        
+                        extern bool pendingThemeChange; extern Theme pendingTheme;
+                        pendingThemeChange = true; pendingTheme = newTheme;
                         
                         LOG_INFO("WebServer", "🔗 Obfuscated theme changed to: " + theme);
                         
@@ -7074,6 +7528,119 @@ void WebServerManager::start() {
                         }
                     }
                     
+                    // /api/rtc GET
+                    if (targetEndpoint == "/api/rtc" && targetMethod == "GET") {
+                        RTCConfig cfg = rtcManager.getConfig();
+                        JsonDocument doc;
+                        doc["enabled"]        = cfg.enabled;
+                        doc["sda_pin"]        = cfg.sda_pin;
+                        doc["scl_pin"]        = cfg.scl_pin;
+                        doc["available"]      = rtcManager.isAvailable();
+                        doc["wifi_connected"] = (WiFi.status() == WL_CONNECTED);
+                        if (rtcManager.isAvailable()) {
+                            DateTime now = rtcManager.getCurrentTime();
+                            char iso[25];
+                            snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02d:%02d:%02dZ",
+                                     now.year(), now.month(), now.day(),
+                                     now.hour(), now.minute(), now.second());
+                            doc["rtc_time"] = iso;
+                        } else {
+                            doc["rtc_time"] = nullptr;
+                        }
+                        String out; serializeJson(doc, out);
+                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", out, secureLayer);
+                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                        return;
+                    }
+                    
+                    // /api/rtc POST
+                    if (targetEndpoint == "/api/rtc" && targetMethod == "POST") {
+                        RTCConfig cfg;
+                        cfg.enabled = targetData["enabled"] | false;
+                        cfg.sda_pin = targetData["sda_pin"]  | 21;
+                        cfg.scl_pin = targetData["scl_pin"]  | 22;
+                        time_t ts   = (time_t)(long)targetData["timestamp"];
+                        rtcManager.saveConfig(cfg);
+                        bool time_synced = false, available = false;
+                        String message = "Config saved";
+                        if (cfg.enabled) {
+                            if (!rtcManager.isInitialized()) {
+                                rtcManager.init();
+                            } else if (cfg.sda_pin != rtcManager.getConfig().sda_pin ||
+                                       cfg.scl_pin != rtcManager.getConfig().scl_pin) {
+                                rtcManager.reinit();
+                            }
+                            available = rtcManager.isAvailable();
+                            if (available && ts > 1609459200) {
+                                struct timeval tv = { ts, 0 };
+                                settimeofday(&tv, nullptr);
+                                rtcManager.syncToRTC(ts);
+                                time_synced = true;
+                                message = "Config saved and time synchronized";
+                            } else if (!available) {
+                                message = "Config saved but DS3231 not found on I2C bus";
+                            } else {
+                                message = "Config saved but timestamp invalid";
+                            }
+                        }
+                        JsonDocument resp;
+                        resp["success"]     = true;
+                        resp["time_synced"] = time_synced;
+                        resp["available"]   = available;
+                        resp["message"]     = message;
+                        String out; serializeJson(resp, out);
+                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", out, secureLayer);
+                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                        return;
+                    }
+                    
+                    if (targetEndpoint == "/api/battery" && targetMethod == "GET") {
+                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                        if (!batteryManager) {
+                            WebServerSecureIntegration::sendSecureResponse(request, 503, 
+                                "application/json", 
+                                "{\"error\":\"Battery manager not available\"}", secureLayer);
+                            return;
+                        }
+                        JsonDocument doc;
+                        doc["level"] = batteryManager->getPercentage();
+                        doc["charging"] = (batteryManager->getVoltage() > 4.15f);
+                        String out;
+                        serializeJson(doc, out);
+                        WebServerSecureIntegration::sendSecureResponse(request, 200, 
+                            "application/json", out, secureLayer);
+                        return;
+                    }
+                    
+                    // /api/boot-mode GET
+                    if (targetEndpoint == "/api/boot-mode" && targetMethod == "GET") {
+                        String mode = configManager.getBootMode();
+                        JsonDocument resp;
+                        resp["boot_mode"] = mode;
+                        String out; serializeJson(resp, out);
+                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", out, secureLayer);
+                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                        return;
+                    }
+                    
+                    // /api/boot-mode POST
+                    if (targetEndpoint == "/api/boot-mode" && targetMethod == "POST") {
+                        String mode = targetData["boot_mode"] | "wifi";
+                        if (mode != "wifi" && mode != "ap" && mode != "offline") {
+                            WebServerSecureIntegration::sendSecureResponse(request, 400, "application/json", "{\"error\":\"Invalid boot_mode\"}", secureLayer);
+                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                            return;
+                        }
+                        bool ok = configManager.saveBootMode(mode);
+                        JsonDocument resp;
+                        resp["success"] = ok;
+                        resp["boot_mode"] = mode;
+                        String out; serializeJson(resp, out);
+                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", out, secureLayer);
+                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                        return;
+                    }
+                    
                     // /api/clock_settings GET
                     if (targetEndpoint == "/api/clock_settings" && targetMethod == "GET") {
                         JsonDocument doc;
@@ -7142,7 +7709,6 @@ void WebServerManager::start() {
                         
                         uint16_t timeout = timeoutStr.toInt();
                         
-                        // Validate timeout values
                         if (timeout != 0 && timeout != 15 && timeout != 30 && timeout != 60 && 
                             timeout != 300 && timeout != 1800) {
                             JsonDocument errorDoc;
@@ -7155,20 +7721,47 @@ void WebServerManager::start() {
                             return;
                         }
                         
+                        String autoLockStr = targetData["auto_lock_timeout"].as<String>();
+                        uint32_t autoLockTimeout = (autoLockStr.length() > 0 && autoLockStr != "null") ? (uint32_t)autoLockStr.toInt() : configManager.getAutoLockTimeout();
+                        
+                        if (autoLockTimeout != 0 && autoLockTimeout != 300 && autoLockTimeout != 900 &&
+                            autoLockTimeout != 1800 && autoLockTimeout != 3600 && autoLockTimeout != 14400) {
+                            JsonDocument errorDoc;
+                            errorDoc["success"] = false;
+                            errorDoc["message"] = "Invalid auto lock timeout value!";
+                            String errorResponse;
+                            serializeJson(errorDoc, errorResponse);
+                            WebServerSecureIntegration::sendSecureResponse(request, 400, "application/json", errorResponse, secureLayer);
+                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                            return;
+                        }
+                        
+                        if (timeout > 0 && autoLockTimeout > 0 && autoLockTimeout <= timeout) {
+                            JsonDocument errorDoc;
+                            errorDoc["success"] = false;
+                            errorDoc["message"] = "Auto lock timeout must be greater than screen timeout!";
+                            String errorResponse;
+                            serializeJson(errorDoc, errorResponse);
+                            WebServerSecureIntegration::sendSecureResponse(request, 400, "application/json", errorResponse, secureLayer);
+                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                            return;
+                        }
+                        
                         JsonDocument doc;
                         int statusCode;
                         
-                        if (configManager.saveDisplayTimeout(timeout)) {
+                        if (configManager.saveDisplayTimeout(timeout) && configManager.saveAutoLockTimeout(autoLockTimeout)) {
                             doc["success"] = true;
-                            doc["message"] = "Display timeout saved successfully!";
+                            doc["message"] = "Display settings saved successfully!";
                             doc["timeout"] = timeout;
+                            doc["auto_lock_timeout"] = autoLockTimeout;
                             statusCode = 200;
-                            LOG_INFO("WebServer", "🔗 Obfuscated display timeout changed to: " + String(timeout) + " seconds");
+                            LOG_INFO("WebServer", "🔗 Obfuscated display timeout=" + String(timeout) + "s autoLock=" + String(autoLockTimeout) + "s");
                         } else {
                             doc["success"] = false;
-                            doc["message"] = "Failed to save display timeout!";
+                            doc["message"] = "Failed to save display settings!";
                             statusCode = 500;
-                            LOG_ERROR("WebServer", "🔗 Obfuscated Failed to save display timeout");
+                            LOG_ERROR("WebServer", "🔗 Obfuscated Failed to save display settings");
                         }
                         
                         String response;
@@ -7267,6 +7860,7 @@ void WebServerManager::start() {
                                         LittleFS.remove(WEB_ADMIN_FILE);
                                         LittleFS.remove(MDNS_CONFIG_FILE);
                                         LittleFS.remove(LOGIN_STATE_FILE);
+                                        LittleFS.remove("/rtc_config.json");
                                         LittleFS.remove("/ble_pin.json.enc");
                                         LittleFS.remove("/session.json.enc");
                                         
@@ -7520,6 +8114,48 @@ void WebServerManager::start() {
                         return;
                     }
                     
+                    if (targetEndpoint == "/api/wifi_credentials" && targetMethod == "POST") {
+                        String ssid = targetData["ssid"].as<String>();
+                        String password = targetData["password"].as<String>();
+                        String confirm = targetData["confirm_password"].as<String>();
+                        
+                        if (ssid.length() == 0) {
+                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                            String out = "{\"success\":false,\"message\":\"SSID is required\"}";
+                            WebServerSecureIntegration::sendSecureResponse(request, 400,
+                                "application/json", out, secureLayer);
+                            return;
+                        }
+                        if (password != confirm) {
+                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                            String out = "{\"success\":false,\"message\":\"Passwords do not match\"}";
+                            WebServerSecureIntegration::sendSecureResponse(request, 400,
+                                "application/json", out, secureLayer);
+                            return;
+                        }
+                        if (password.length() > 0 && password.length() < 8) {
+                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                            String out = "{\"success\":false,\"message\":\"Password must be at least 8 characters\"}";
+                            WebServerSecureIntegration::sendSecureResponse(request, 400,
+                                "application/json", out, secureLayer);
+                            return;
+                        }
+                        
+                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                        
+                        String out;
+                        if (wifiManager && wifiManager->saveCredentials(ssid, password)) {
+                            out = "{\"success\":true,\"message\":\"WiFi credentials saved. Reboot to apply.\"}";
+                            WebServerSecureIntegration::sendSecureResponse(request, 200,
+                                "application/json", out, secureLayer);
+                        } else {
+                            out = "{\"success\":false,\"message\":\"Failed to save WiFi credentials\"}";
+                            WebServerSecureIntegration::sendSecureResponse(request, 500,
+                                "application/json", out, secureLayer);
+                        }
+                        return;
+                    }
+                    
                     // /api/change_ap_password POST
                     if (targetEndpoint == "/api/change_ap_password" && targetMethod == "POST") {
                         LOG_INFO("WebServer", "🔗 Obfuscated change_ap_password request");
@@ -7738,6 +8374,47 @@ void WebServerManager::start() {
                             if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
                             return;
                         }
+                    }
+                    
+                    // /api/passwords/reorder POST
+                    if (targetEndpoint == "/api/passwords/reorder" && targetMethod == "POST") {
+                        if (request->hasHeader("X-User-Activity")) {
+                            resetActivityTimer();
+                        }
+                        
+                        if (!targetData["order"].is<JsonArray>()) {
+                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                            return request->send(400, "text/plain", "Missing or invalid 'order' field");
+                        }
+                        
+                        std::vector<std::pair<String, int>> newOrder;
+                        JsonArray orderArray = targetData["order"].as<JsonArray>();
+                        
+                        for (JsonObject item : orderArray) {
+                            String name = item["name"].as<String>();
+                            int order = item["order"].as<int>();
+                            newOrder.push_back(std::make_pair(name, order));
+                        }
+                        
+                        LOG_DEBUG("WebServer", "🔗 Obfuscated Passwords reorder: " + String(newOrder.size()) + " passwords");
+                        bool success = passwordManager.reorderPasswords(newOrder);
+                        
+                        String output;
+                        int statusCode;
+                        if (success) {
+                            output = "{\"status\":\"success\",\"message\":\"Passwords reordered successfully!\"}";
+                            statusCode = 200;
+                            LOG_DEBUG("WebServer", "🔗 Obfuscated passwords reordered successfully");
+                        } else {
+                            output = "{\"status\":\"error\",\"message\":\"Failed to reorder passwords\"}";
+                            statusCode = 500;
+                            LOG_ERROR("WebServer", "🔗 Obfuscated failed to reorder passwords");
+                        }
+                        
+                        LOG_INFO("WebServer", "🔐 OBFUSCATED PASSWORDS REORDER: Securing response");
+                        WebServerSecureIntegration::sendSecureResponse(request, statusCode, "application/json", output, secureLayer);
+                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                        return;
                     }
                     
                     // /api/passwords/export POST

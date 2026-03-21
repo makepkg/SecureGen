@@ -511,8 +511,16 @@ SecureLayerManager::SecureSession* SecureLayerManager::findSession(const String&
 
 SecureLayerManager::SecureSession* SecureLayerManager::createSession(const String& clientId) {
     if (sessions.size() >= SECURE_MAX_SESSIONS) {
-        LOG_WARNING("🔐", "Session limit reached: " + String(SECURE_MAX_SESSIONS));
-        return nullptr;
+        // Evict the least recently used session instead of rejecting
+        auto oldest = sessions.begin();
+        for (auto it = sessions.begin(); it != sessions.end(); ++it) {
+            if (it->second.lastActivity < oldest->second.lastActivity) {
+                oldest = it;
+            }
+        }
+        LOG_INFO("🔐", "Session limit reached — evicting LRU: " + 
+                 oldest->second.clientId.substring(0,8) + "...");
+        sessions.erase(oldest);
     }
     
     SecureSession session;

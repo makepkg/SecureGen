@@ -7,8 +7,15 @@ import Layout from '../layouts/Layout.astro';
     <p class="breadcrumb">
       <a href="/SecureGen/">Home</a> / Tools
     </p>
-    <h1>Backup Tools</h1>
-    <p class="description">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.25rem;">
+      <h1 style="margin:0;" data-i18n="title">Backup Tools</h1>
+      <div style="font-size:1.3rem;display:flex;gap:0.5rem;">
+        <button id="lang-en" style="background:none;border:none;cursor:pointer;font-size:1.3rem;opacity:1;" title="English">🇬🇧</button>
+        <button id="lang-ru" style="background:none;border:none;cursor:pointer;font-size:1.3rem;opacity:0.4;" title="Русский">🇷🇺</button>
+        <button id="lang-zh" style="background:none;border:none;cursor:pointer;font-size:1.3rem;opacity:0.4;" title="中文">🇨🇳</button>
+      </div>
+    </div>
+    <p class="description" data-i18n="description">
       Offline tools for managing encrypted backup files from your device.
     </p>
   </section>
@@ -16,55 +23,55 @@ import Layout from '../layouts/Layout.astro';
   <section class="tool-cards">
     <div class="tool-card">
       <div class="tool-icon">🔓</div>
-      <h2>Decrypt & Edit Backups</h2>
-      <p class="tool-description">
+      <h2 data-i18n="card1.title">Decrypt & Edit Backups</h2>
+      <p class="tool-description" data-i18n="card1.desc">
         Decrypt your .enc backup files in the browser. View and edit TOTP keys or passwords, 
         change the encryption password, re-encrypt and save. Your data never leaves this device — 
         all processing is local.
       </p>
       <ul class="feature-list">
-        <li>✓ Works offline</li>
-        <li>✓ Edit TOTP keys</li>
-        <li>✓ Edit passwords</li>
-        <li>✓ Re-encrypt & export</li>
+        <li data-i18n="card1.f1">✓ Works offline</li>
+        <li data-i18n="card1.f2">✓ Edit TOTP keys</li>
+        <li data-i18n="card1.f3">✓ Edit passwords</li>
+        <li data-i18n="card1.f4">✓ Re-encrypt & export</li>
       </ul>
-      <a href="/SecureGen/tools-app.html" class="btn-tool">Open Backup Editor →</a>
+      <a href="/SecureGen/tools-app.html" class="btn-tool" data-i18n="card1.btn">Open Backup Editor →</a>
     </div>
 
     <div class="tool-card">
       <div class="tool-icon">💾</div>
-      <h2>Offline Use</h2>
-      <p class="tool-description">
+      <h2 data-i18n="card2.title">Offline Use</h2>
+      <p class="tool-description" data-i18n="card2.desc">
         Save the editor to your computer for use without any internet connection.
       </p>
       <ol class="steps-list">
-        <li>Open Backup Editor above</li>
-        <li>Press Ctrl+S (or Cmd+S on Mac) to save the page</li>
-        <li>Open the saved HTML file in any browser — it works fully offline</li>
+        <li data-i18n="card2.s1">Open Backup Editor above</li>
+        <li data-i18n="card2.s2">Press Ctrl+S (or Cmd+S on Mac) to save the page</li>
+        <li data-i18n="card2.s3">Open the saved HTML file in any browser — it works fully offline</li>
       </ol>
-      <p class="note">Note: The editor has no external dependencies.</p>
+      <p class="note" data-i18n="card2.note">Note: The editor has no external dependencies.</p>
     </div>
   </section>
 
   <section class="how-it-works">
-    <h2>How It Works</h2>
+    <h2 data-i18n="how.title">How It Works</h2>
     <div class="workflow">
       <div class="workflow-step">
         <div class="step-icon">📤</div>
-        <h3>Export from device</h3>
-        <p>Go to web cabinet → TOTP or Passwords → Export → download .enc file</p>
+        <h3 data-i18n="step1.title">Export from device</h3>
+        <p data-i18n="step1.desc">Go to web cabinet → TOTP or Passwords → Export → download .enc file</p>
       </div>
       <div class="workflow-arrow">→</div>
       <div class="workflow-step">
         <div class="step-icon">🔓</div>
-        <h3>Open in editor</h3>
-        <p>Click 'Open Backup Editor', upload the .enc file, enter your admin password</p>
+        <h3 data-i18n="step2.title">Open in editor</h3>
+        <p data-i18n="step2.desc">Click 'Open Backup Editor', upload the .enc file, enter your admin password</p>
       </div>
       <div class="workflow-arrow">→</div>
       <div class="workflow-step">
         <div class="step-icon">📥</div>
-        <h3>Import back</h3>
-        <p>Edit entries, click 'Save Encrypted', import the new .enc file on any device</p>
+        <h3 data-i18n="step3.title">Import back</h3>
+        <p data-i18n="step3.desc">Edit entries, click 'Save Encrypted', import the new .enc file on any device</p>
       </div>
     </div>
   </section>
@@ -73,12 +80,12 @@ import Layout from '../layouts/Layout.astro';
     <div class="callout callout-info">
       <div class="callout-header">
         <span class="callout-icon">🛡️</span>
-        <strong>Security</strong>
+        <strong data-i18n="security.title">Security</strong>
       </div>
       <p>
-        This tool runs entirely in your browser using the Web Crypto API (AES-CBC + PBKDF2). 
+        <span data-i18n="security.p">This tool runs entirely in your browser using the Web Crypto API (AES-CBC + PBKDF2). 
         No data is sent to any server. The encryption format is identical to the device — 
-        files encrypted here can be imported directly to your ESP32.
+        files encrypted here can be imported directly to your ESP32.</span>
       </p>
       <p class="source-link">
         View source: 
@@ -89,6 +96,112 @@ import Layout from '../layouts/Layout.astro';
     </div>
   </section>
 </Layout>
+
+<script is:inline>
+const TOOLS_I18N = {
+en: {
+title: 'Backup Tools',
+description: 'Offline tools for managing encrypted backup files from your device.',
+'card1.title': 'Decrypt & Edit Backups',
+'card1.desc': 'Decrypt your .enc backup files in the browser. View and edit TOTP keys or passwords, change the encryption password, re-encrypt and save. Your data never leaves this device — all processing is local.',
+'card1.f1': '✓ Works offline',
+'card1.f2': '✓ Edit TOTP keys',
+'card1.f3': '✓ Edit passwords',
+'card1.f4': '✓ Re-encrypt & export',
+'card1.btn': 'Open Backup Editor →',
+'card2.title': 'Offline Use',
+'card2.desc': 'Save the editor to your computer for use without any internet connection.',
+'card2.s1': 'Open Backup Editor above',
+'card2.s2': 'Press Ctrl+S (or Cmd+S on Mac) to save the page',
+'card2.s3': 'Open the saved HTML file in any browser — it works fully offline',
+'card2.note': 'Note: The editor has no external dependencies.',
+'how.title': 'How It Works',
+'step1.title': 'Export from device',
+'step1.desc': 'Go to web cabinet → TOTP or Passwords → Export → download .enc file',
+'step2.title': 'Open in editor',
+'step2.desc': "Click 'Open Backup Editor', upload the .enc file, enter your admin password",
+'step3.title': 'Import back',
+'step3.desc': "Edit entries, click 'Save Encrypted', import the new .enc file on any device",
+'security.title': 'Security',
+'security.p': 'This tool runs entirely in your browser using the Web Crypto API (AES-CBC + PBKDF2). No data is sent to any server. The encryption format is identical to the device — files encrypted here can be imported directly to your ESP32.'
+},
+zh: {
+title: '备份工具',
+description: '用于管理设备加密备份文件的离线工具。',
+'card1.title': '解密和编辑备份',
+'card1.desc': '在浏览器中解密.enc备份文件。查看和编辑TOTP密钥或密码，更改加密密码，重新加密并保存。数据不离开此设备——所有处理均在本地完成。',
+'card1.f1': '✓ 离线工作',
+'card1.f2': '✓ 编辑TOTP密钥',
+'card1.f3': '✓ 编辑密码',
+'card1.f4': '✓ 重新加密和导出',
+'card1.btn': '打开备份编辑器 →',
+'card2.title': '离线使用',
+'card2.desc': '将编辑器保存到计算机，无需互联网连接即可使用。',
+'card2.s1': '在上方打开备份编辑器',
+'card2.s2': '按Ctrl+S（Mac上按Cmd+S）保存页面',
+'card2.s3': '在任何浏览器中打开保存的HTML文件——完全离线工作',
+'card2.note': '注意：编辑器没有外部依赖。',
+'how.title': '工作原理',
+'step1.title': '从设备导出',
+'step1.desc': '进入web控制台 → TOTP或密码 → 导出 → 下载.enc文件',
+'step2.title': '在编辑器中打开',
+'step2.desc': "点击'打开备份编辑器'，上传.enc文件，输入管理员密码",
+'step3.title': '导入回设备',
+'step3.desc': "编辑条目，点击'保存加密'，将新的.enc文件导入任何设备",
+'security.title': '安全性',
+'security.p': '此工具完全在您的浏览器中使用Web Crypto API（AES-CBC + PBKDF2）运行。没有数据发送到任何服务器。加密格式与设备相同——在此加密的文件可以直接导入您的ESP32。'
+},
+ru: {
+title: 'Инструменты резервного копирования',
+description: 'Офлайн-инструменты для управления зашифрованными резервными файлами с устройства.',
+'card1.title': 'Расшифровка и редактирование резервных копий',
+'card1.desc': 'Расшифруйте файлы .enc в браузере. Просматривайте и редактируйте TOTP-ключи или пароли, меняйте пароль шифрования, перешифруйте и сохраните. Данные не покидают устройство — обработка полностью локальная.',
+'card1.f1': '✓ Работает офлайн',
+'card1.f2': '✓ Редактирование TOTP-ключей',
+'card1.f3': '✓ Редактирование паролей',
+'card1.f4': '✓ Перешифрование и экспорт',
+'card1.btn': 'Открыть редактор резервных копий →',
+'card2.title': 'Офлайн-использование',
+'card2.desc': 'Сохраните редактор на компьютер для использования без интернета.',
+'card2.s1': 'Откройте редактор резервных копий выше',
+'card2.s2': 'Нажмите Ctrl+S (или Cmd+S на Mac) для сохранения страницы',
+'card2.s3': 'Откройте сохранённый HTML-файл в любом браузере — работает полностью офлайн',
+'card2.note': 'Примечание: редактор не имеет внешних зависимостей.',
+'how.title': 'Как это работает',
+'step1.title': 'Экспорт с устройства',
+'step1.desc': 'Откройте веб-кабинет → TOTP или Пароли → Экспорт → скачайте файл .enc',
+'step2.title': 'Открыть в редакторе',
+'step2.desc': "Нажмите 'Открыть редактор', загрузите файл .enc, введите пароль администратора",
+'step3.title': 'Импорт обратно',
+'step3.desc': "Отредактируйте записи, нажмите 'Сохранить зашифрованным', импортируйте новый файл .enc на любое устройство",
+'security.title': 'Безопасность',
+'security.p': 'Инструмент работает полностью в браузере через Web Crypto API (AES-CBC + PBKDF2). Данные не отправляются ни на какой сервер. Формат шифрования идентичен устройству — файлы, зашифрованные здесь, можно импортировать напрямую на ESP32.'
+}
+};
+
+let toolsLang = localStorage.getItem('site_lang') || 'en';
+
+function trT(k) { return TOOLS_I18N[toolsLang]?.[k] ?? TOOLS_I18N.en[k] ?? k; }
+
+function setLang(l) {
+toolsLang = l;
+localStorage.setItem('site_lang', l);
+if (typeof applyNavLang === 'function') applyNavLang();
+document.getElementById('lang-en').style.opacity = l === 'en' ? '1' : '0.4';
+document.getElementById('lang-ru').style.opacity = l === 'ru' ? '1' : '0.4';
+document.getElementById('lang-zh').style.opacity = l === 'zh' ? '1' : '0.4';
+document.querySelectorAll('[data-i18n]').forEach(el => {
+el.textContent = trT(el.dataset.i18n);
+});
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  setLang(toolsLang);
+  document.getElementById('lang-en').addEventListener('click', () => setLang('en'));
+  document.getElementById('lang-ru').addEventListener('click', () => setLang('ru'));
+  document.getElementById('lang-zh').addEventListener('click', () => setLang('zh'));
+});
+</script>
 
 <style>
   .page-header {

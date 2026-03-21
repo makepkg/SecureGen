@@ -176,6 +176,66 @@ bool ConfigManager::saveStartupMode(const String& mode) {
     }
 }
 
+String ConfigManager::getBootMode() {
+    if (LittleFS.exists(CONFIG_FILE)) {
+        fs::File configFile = LittleFS.open(CONFIG_FILE, "r");
+        if (configFile) {
+            JsonDocument doc;
+            DeserializationError error = deserializeJson(doc, configFile);
+            if (error == DeserializationError::Ok) {
+                String mode = doc["boot_mode"] | "wifi";
+                configFile.close();
+                LOG_INFO("ConfigManager", "Loaded boot mode: " + mode);
+                return mode;
+            } else {
+                LOG_ERROR("ConfigManager", "Failed to parse boot mode config: " + String(error.c_str()));
+            }
+            configFile.close();
+        } else {
+            LOG_ERROR("ConfigManager", "Failed to open config file for boot mode reading");
+        }
+    } else {
+        LOG_INFO("ConfigManager", "No config file found. Using default boot mode: wifi");
+    }
+    return "wifi";
+}
+
+bool ConfigManager::saveBootMode(const String& mode) {
+    LOG_INFO("ConfigManager", "saveBootMode() called with mode: " + mode);
+    JsonDocument doc;
+    
+    if (LittleFS.exists(CONFIG_FILE)) {
+        fs::File configFile = LittleFS.open(CONFIG_FILE, "r");
+        if (configFile) {
+            DeserializationError error = deserializeJson(doc, configFile);
+            if (error != DeserializationError::Ok) {
+                LOG_WARNING("ConfigManager", "Failed to parse existing config, creating new: " + String(error.c_str()));
+            }
+            configFile.close();
+        } else {
+            LOG_WARNING("ConfigManager", "Failed to open existing config file for reading");
+        }
+    }
+    
+    doc["boot_mode"] = mode;
+    
+    fs::File configFile = LittleFS.open(CONFIG_FILE, "w");
+    if (configFile) {
+        size_t bytesWritten = serializeJson(doc, configFile);
+        configFile.close();
+        if (bytesWritten > 0) {
+            LOG_INFO("ConfigManager", "Boot mode saved successfully");
+            return true;
+        } else {
+            LOG_ERROR("ConfigManager", "Failed to write boot mode config data");
+            return false;
+        }
+    } else {
+        LOG_ERROR("ConfigManager", "Failed to open config file for boot mode writing");
+        return false;
+    }
+}
+
 
 
 uint16_t ConfigManager::getWebServerTimeout() {
@@ -438,6 +498,71 @@ bool ConfigManager::saveDisplayTimeout(uint16_t timeout) {
         }
     } else {
         LOG_ERROR("ConfigManager", "Failed to open config file for display timeout writing");
+        return false;
+    }
+}
+
+uint32_t ConfigManager::getAutoLockTimeout() {
+    if (_autoLockTimeoutCached) {
+        return _cachedAutoLockTimeout;
+    }
+
+    if (LittleFS.exists(CONFIG_FILE)) {
+        fs::File configFile = LittleFS.open(CONFIG_FILE, "r");
+        if (configFile) {
+            JsonDocument doc;
+            DeserializationError error = deserializeJson(doc, configFile);
+            if (error == DeserializationError::Ok) {
+                uint32_t timeout = doc["auto_lock_timeout"] | 0;
+                configFile.close();
+                _cachedAutoLockTimeout = timeout;
+                _autoLockTimeoutCached = true;
+                LOG_INFO("ConfigManager", "Loaded auto lock timeout: " + String(timeout) + " seconds");
+                return timeout;
+            }
+            configFile.close();
+        }
+    }
+
+    _cachedAutoLockTimeout = 0;
+    _autoLockTimeoutCached = true;
+    LOG_INFO("ConfigManager", "No config file found. Using default auto lock timeout: Never");
+    return 0;
+}
+
+bool ConfigManager::saveAutoLockTimeout(uint32_t timeout) {
+    LOG_INFO("ConfigManager", "saveAutoLockTimeout() called with value: " + String(timeout) + " seconds");
+
+    _autoLockTimeoutCached = false;
+
+    JsonDocument doc;
+
+    if (LittleFS.exists(CONFIG_FILE)) {
+        fs::File configFile = LittleFS.open(CONFIG_FILE, "r");
+        if (configFile) {
+            DeserializationError error = deserializeJson(doc, configFile);
+            if (error != DeserializationError::Ok) {
+                LOG_WARNING("ConfigManager", "Failed to parse existing config, creating new: " + String(error.c_str()));
+            }
+            configFile.close();
+        }
+    }
+
+    doc["auto_lock_timeout"] = timeout;
+
+    fs::File configFile = LittleFS.open(CONFIG_FILE, "w");
+    if (configFile) {
+        size_t bytesWritten = serializeJson(doc, configFile);
+        configFile.close();
+        if (bytesWritten > 0) {
+            LOG_INFO("ConfigManager", "Auto lock timeout saved successfully");
+            return true;
+        } else {
+            LOG_ERROR("ConfigManager", "Failed to write auto lock timeout to config file");
+            return false;
+        }
+    } else {
+        LOG_ERROR("ConfigManager", "Failed to open config file for auto lock timeout writing");
         return false;
     }
 }

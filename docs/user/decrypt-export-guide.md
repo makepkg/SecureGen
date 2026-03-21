@@ -14,6 +14,7 @@ It works with two types of backup files:
 With the tool you can: decrypt and view backups, edit any field, add or delete entries, re-encrypt and save, create new files from scratch, and change the file password.
 
 > **Fully offline.** Your data never leaves your computer. The tool runs entirely in the browser with no network requests.
+The interface is available in five languages: English, Russian, German, Chinese (Simplified), and Spanish. Use the language selector in the top-right corner to switch.
 
 ---
 

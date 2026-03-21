@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SecureGen — Руководство пользователя</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --border: #1e1e2e;
+    --accent: #00e5ff;
+    --accent2: #7c3aed;
+    --text: #c9d1d9;
+    --text-dim: #586069;
+    --text-bright: #e6edf3;
+    --warn: #f59e0b;
+    --danger: #ef4444;
+    --success: #22c55e;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-weight: 300;
+    line-height: 1.7;
+    min-height: 100vh;
+  }
+
+  /* Layout */
+  .layout { display: flex; min-height: 100vh; }
+
+  /* Sidebar */
+  .sidebar {
+    width: 260px;
+    min-width: 260px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 2rem 0;
+  }
+
+  .sidebar-logo {
+    padding: 0 1.5rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 1rem;
+  }
+
+  .sidebar-logo .device-name {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    color: var(--accent);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 0.2rem;
+  }
+
+  .sidebar-logo h1 {
+    font-family: var(--mono);
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-bright);
+  }
+
+  .nav-section {
+    padding: 0.5rem 0;
+  }
+
+  .nav-label {
+    font-family: var(--mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    padding: 0.4rem 1.5rem;
+    display: block;
+  }
+
+  .nav-link {
+    display: block;
+    padding: 0.35rem 1.5rem;
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 0.85rem;
+    font-weight: 400;
+    border-left: 2px solid transparent;
+    transition: all 0.15s;
+  }
+
+  .nav-link:hover {
+    color: var(--text-bright);
+    background: rgba(0,229,255,0.04);
+    border-left-color: var(--accent);
+  }
+
+  .nav-link.active {
+    color: var(--accent);
+    border-left-color: var(--accent);
+    background: rgba(0,229,255,0.06);
+  }
+
+  /* Main content */
+  .main {
+    flex: 1;
+    max-width: 820px;
+    padding: 3rem 3.5rem;
+    overflow-x: hidden;
+  }
+
+  /* Section */
+  .section {
+    margin-bottom: 4rem;
+    scroll-margin-top: 2rem;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section-num {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    color: var(--accent);
+    background: rgba(0,229,255,0.08);
+    border: 1px solid rgba(0,229,255,0.2);
+    padding: 0.15rem 0.5rem;
+    border-radius: 2px;
+    letter-spacing: 0.05em;
+  }
+
+  h2 {
+    font-family: var(--mono);
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text-bright);
+    letter-spacing: 0.02em;
+  }
+
+  h3 {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--accent);
+    letter-spacing: 0.05em;
+    margin: 1.75rem 0 0.75rem;
+    text-transform: uppercase;
+  }
+
+  h4 {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-bright);
+    margin: 1.25rem 0 0.5rem;
+  }
+
+  p {
+    font-size: 0.9rem;
+    color: var(--text);
+    margin-bottom: 0.75rem;
+  }
+
+  /* Tables */
+  .table-wrap { overflow-x: auto; margin: 1rem 0; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+
+  th {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    text-align: left;
+    padding: 0.6rem 1rem;
+    background: rgba(255,255,255,0.02);
+    border-bottom: 1px solid var(--border);
+  }
+
+  td {
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    color: var(--text);
+    vertical-align: top;
+  }
+
+  tr:last-child td { border-bottom: none; }
+
+  td:first-child {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--text-bright);
+    white-space: nowrap;
+  }
+
+  /* Key badge */
+  .key {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-bottom: 2px solid rgba(255,255,255,0.15);
+    padding: 0.1rem 0.45rem;
+    border-radius: 3px;
+    color: var(--text-bright);
+    white-space: nowrap;
+  }
+
+  /* Callouts */
+  .callout {
+    border-left: 3px solid;
+    padding: 0.75rem 1rem;
+    margin: 1rem 0;
+    border-radius: 0 4px 4px 0;
+    font-size: 0.85rem;
+  }
+
+  .callout-warn {
+    border-color: var(--warn);
+    background: rgba(245,158,11,0.06);
+    color: #fcd34d;
+  }
+
+  .callout-info {
+    border-color: var(--accent);
+    background: rgba(0,229,255,0.05);
+    color: #67e8f9;
+  }
+
+  .callout-danger {
+    border-color: var(--danger);
+    background: rgba(239,68,68,0.06);
+    color: #fca5a5;
+  }
+
+  .callout strong {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 0.25rem;
+    opacity: 0.8;
+  }
+
+  /* Mode cards */
+  .mode-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin: 1rem 0;
+  }
+
+  .mode-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem;
+  }
+
+  .mode-card .mode-title {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-bright);
+    letter-spacing: 0.05em;
+    margin-bottom: 0.25rem;
+  }
+
+  .mode-card .mode-trigger {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .mode-card ul {
+    list-style: none;
+    font-size: 0.8rem;
+  }
+
+  .mode-card li {
+    padding: 0.15rem 0;
+    color: var(--text);
+  }
+
+  .mode-card li::before {
+    content: '✓ ';
+    color: var(--success);
+    font-family: var(--mono);
+  }
+
+  .mode-card li.no::before {
+    content: '✗ ';
+    color: var(--text-dim);
+  }
+
+  .mode-card li.no { color: var(--text-dim); }
+
+  /* Steps */
+  .steps { list-style: none; counter-reset: step; margin: 0.75rem 0; }
+
+  .steps li {
+    counter-increment: step;
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    padding: 0.5rem 0;
+    font-size: 0.88rem;
+  }
+
+  .steps li::before {
+    content: counter(step);
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: rgba(0,229,255,0.1);
+    border: 1px solid rgba(0,229,255,0.25);
+    min-width: 1.5rem;
+    height: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 2px;
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+  }
+
+  /* Inline code */
+  code {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--border);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    color: var(--accent);
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { padding: 2rem 1.5rem; }
+    .mode-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo" style="position:relative;">
+      <span class="device-name">ESP32 T-Display</span>
+      <h1>SecureGen</h1>
+      <div style="position:absolute;bottom:0;right:0.5rem;font-size:0.8rem;">
+        <a href="guide-standalone.html" style="color:var(--text-dim);text-decoration:none;">🇬🇧</a> &nbsp;
+        <strong style="color:var(--accent);">🇷🇺</strong>
+      </div>
+    </div>
+    <div class="nav-section">
+      <span class="nav-label">Устройство</span>
+      <a href="#buttons" class="nav-link">Кнопки</a>
+      <a href="#first-boot" class="nav-link">Первый запуск</a>
+      <a href="#modes" class="nav-link">Режимы работы</a>
+      <a href="#navigation" class="nav-link">Навигация</a>
+      <a href="#ble" class="nav-link">BLE передача</a>
+      <a href="#factory-reset" class="nav-link">Сброс настроек</a>
+    </div>
+    <div class="nav-section">
+      <span class="nav-label">Веб-кабинет</span>
+      <a href="#web-access" class="nav-link">Доступ и вход</a>
+      <a href="#widget-bar" class="nav-link">Виджет-бар</a>
+      <a href="#keys" class="nav-link">Ключи (TOTP / HOTP)</a>
+      <a href="#passwords" class="nav-link">Пароли</a>
+      <a href="#display" class="nav-link">Экран</a>
+      <a href="#pin" class="nav-link">Настройки PIN</a>
+      <a href="#settings" class="nav-link">Настройки</a>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <main class="main">
+
+    <!-- BUTTONS -->
+    <div class="section" id="buttons">
+      <div class="section-header">
+        <span class="section-num">01</span>
+        <h2>Кнопки</h2>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Кнопка</th><th>Описание</th></tr></thead>
+          <tbody>
+            <tr><td><span class="key">▲ Верх</span></td><td>Навигация вверх / увеличение цифры</td></tr>
+            <tr><td><span class="key">▼ Низ</span></td><td>Навигация вниз / следующая цифра</td></tr>
+            <tr><td><span class="key">RST</span></td><td>Аппаратная перезагрузка — аналог отключения питания</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- FIRST BOOT -->
+    <div class="section" id="first-boot">
+      <div class="section-header">
+        <span class="section-num">02</span>
+        <h2>Первый запуск</h2>
+      </div>
+
+      <h3>Шаг 1 — Создание PIN</h3>
+      <p>При первом включении устройство предлагает создать PIN-код. Этот PIN шифрует главный ключ устройства — он требуется при каждом запуске.</p>
+
+      <h3>Шаг 2 — Подключение к WiFi</h3>
+      <p>После создания PIN устройство запускает точку доступа. Подключитесь к ней с телефона или компьютера. Автоматически откроется captive portal — выберите сеть WiFi и введите пароль. После сохранения устройство перезагрузится.</p>
+      <div class="callout callout-info">
+        <strong>Примечание</strong>
+        WiFi можно также настроить позже через веб-кабинет в режиме AP, до запуска автоматической настройки.
+      </div>
+
+      <h3>Шаг 3 — Веб-кабинет запускается автоматически</h3>
+      <p>При первой загрузке после настройки WiFi веб-сервер запускается автоматически. Введите IP-адрес устройства или mDNS-адрес в браузере для завершения регистрации.</p>
+    </div>
+
+    <!-- MODES -->
+    <div class="section" id="modes">
+      <div class="section-header">
+        <span class="section-num">03</span>
+        <h2>Режимы работы</h2>
+      </div>
+
+      <p>После ввода PIN при каждой загрузке устройство показывает экран выбора режима. На экране отображаются две кнопки — они соответствуют двум не-дефолтным сетевым режимам. Третий режим (заданный по умолчанию) запускается автоматически через <strong>2 секунды</strong>, если ни одна кнопка не нажата.</p>
+      <p>Режим по умолчанию настраивается в <strong>Настройки → Режим загрузки</strong>. Заводской режим — WiFi Client. Каждое нажатие кнопки сбрасывает таймер на 2 секунды.</p>
+
+      <div class="mode-grid">
+        <div class="mode-card">
+          <div class="mode-title">Режим AP</div>
+          <div class="mode-trigger">Нажать <span class="key">▲ Верх</span></div>
+          <ul>
+            <li>Пароли</li>
+            <li>Коды HOTP</li>
+            <li>Веб-кабинет</li>
+            <li>BLE передача</li>
+            <li>TOTP (нужен DS3231)</li>
+          </ul>
+        </div>
+        <div class="mode-card">
+          <div class="mode-title">Офлайн режим</div>
+          <div class="mode-trigger">Нажать <span class="key">▼ Низ</span></div>
+          <ul>
+            <li>Пароли</li>
+            <li>Коды HOTP</li>
+            <li>BLE передача</li>
+            <li>TOTP (нужен DS3231)</li>
+            <li class="no">Веб-кабинет</li>
+          </ul>
+        </div>
+        <div class="mode-card">
+          <div class="mode-title">Режим WiFi</div>
+          <div class="mode-trigger">Без кнопки — авто</div>
+          <ul>
+            <li>Пароли</li>
+            <li>Коды HOTP</li>
+            <li>Коды TOTP</li>
+            <li>Веб-кабинет (опц.)</li>
+            <li>BLE (без веб-сервера)</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>Режим WiFi — Веб-сервер</h3>
+      <p>После подключения к WiFi и синхронизации времени через NTP устройство спрашивает: <strong>включить веб-сервер?</strong></p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Состояние</th><th>Доступно</th></tr></thead>
+          <tbody>
+            <tr><td>Веб-сервер ВЫКЛ</td><td>TOTP, HOTP, пароли, BLE передача</td></tr>
+            <tr><td>Веб-сервер ВКЛ</td><td>TOTP, HOTP, пароли, веб-кабинет — BLE передача отключена</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- NAVIGATION -->
+    <div class="section" id="navigation">
+      <div class="section-header">
+        <span class="section-num">04</span>
+        <h2>Навигация по устройству</h2>
+      </div>
+
+      <h3>Экран ввода PIN</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Действие</th><th>Результат</th></tr></thead>
+          <tbody>
+            <tr><td><span class="key">▲ Верх</span></td><td>Увеличить текущую цифру</td></tr>
+            <tr><td><span class="key">▼ Низ</span></td><td>Перейти к следующей цифре</td></tr>
+            <tr><td>Двойное нажатие <span class="key">▼ Низ</span></td><td>Вернуться на цифру назад</td></tr>
+            <tr><td>Удержание обеих кнопок</td><td>Выключение — глубокий сон. Нажмите <span class="key">▼ Низ</span> для пробуждения (требуется PIN).</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Экран TOTP / HOTP</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Действие</th><th>Результат</th></tr></thead>
+          <tbody>
+            <tr><td><span class="key">▲ Верх</span></td><td>Предыдущий ключ</td></tr>
+            <tr><td><span class="key">▼ Низ</span></td><td>Следующий ключ</td></tr>
+            <tr><td>Удержание обеих (HOTP)</td><td>Увеличить счётчик — получить следующий HOTP-код</td></tr>
+            <tr><td>Удержание обеих (TOTP)</td><td>Нет действия</td></tr>
+            <tr><td>Удержание <span class="key">▲ Верх</span> 5 сек</td><td>Переключиться в менеджер паролей</td></tr>
+            <tr><td>Удержание <span class="key">▼ Низ</span></td><td>Выключение — глубокий сон. Нажмите <span class="key">▼ Низ</span> для пробуждения (требуется PIN).</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Экран менеджера паролей</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Действие</th><th>Результат</th></tr></thead>
+          <tbody>
+            <tr><td><span class="key">▲ Верх</span></td><td>Предыдущий пароль</td></tr>
+            <tr><td><span class="key">▼ Низ</span></td><td>Следующий пароль</td></tr>
+            <tr><td>Удержание обеих кнопок</td><td>Начать BLE передачу</td></tr>
+            <tr><td>Удержание <span class="key">▲ Верх</span> 5 сек</td><td>Вернуться в TOTP / HOTP</td></tr>
+            <tr><td>Удержание <span class="key">▼ Низ</span></td><td>Выключение — глубокий сон. Нажмите <span class="key">▼ Низ</span> для пробуждения (требуется PIN).</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- BLE -->
+    <div class="section" id="ble">
+      <div class="section-header">
+        <span class="section-num">05</span>
+        <h2>BLE передача паролей</h2>
+      </div>
+
+      <p>BLE передача работает без приложений — устройство действует как Bluetooth HID-клавиатура и напрямую вводит пароль.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Режим</th><th>BLE доступен</th></tr></thead>
+          <tbody>
+            <tr><td>Офлайн</td><td>✓ Да</td></tr>
+            <tr><td>AP</td><td>✓ Да</td></tr>
+            <tr><td>WiFi — веб-сервер ВЫКЛ</td><td>✓ Да</td></tr>
+            <tr><td>WiFi — веб-сервер ВКЛ</td><td>✗ Нет</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Первое подключение (сопряжение)</h3>
+      <ol class="steps">
+        <li>На экране менеджера паролей удержите обе кнопки</li>
+        <li>На дисплее устройства появится PIN-код</li>
+        <li>На телефоне выберите устройство в настройках Bluetooth и введите этот PIN</li>
+        <li>Сопряжение сохранено — в следующий раз PIN не нужен</li>
+      </ol>
+
+      <h3>Отправка пароля</h3>
+      <ol class="steps">
+        <li>Выберите нужный пароль кнопками <span class="key">▲</span> / <span class="key">▼</span></li>
+        <li>Пароль передаётся на телефон как ввод с клавиатуры</li>
+        <li>Нажмите <span class="key">▲ Верх</span> для выхода из BLE и возврата к паролям</li>
+      </ol>
+
+      <div class="callout callout-info">
+        <strong>Примечание</strong>
+        Если настроен аппаратный BLE PIN, устройство запросит подтверждение на экране перед передачей.
+      </div>
+    </div>
+
+    <!-- FACTORY RESET -->
+    <div class="section" id="factory-reset">
+      <div class="section-header">
+        <span class="section-num">06</span>
+        <h2>Сброс до заводских настроек</h2>
+      </div>
+
+      <ol class="steps">
+        <li>Нажмите <span class="key">RST</span></li>
+        <li>Сразу после перезагрузки — удержите обе кнопки одновременно</li>
+      </ol>
+
+      <div class="callout callout-danger">
+        <strong>Внимание</strong>
+        Сброс навсегда удаляет все TOTP/HOTP-ключи, пароли, данные WiFi, сессии и PIN. Экспортируйте данные перед сбросом, если нужно их восстановить.
+      </div>
+    </div>
+
+    <!-- WEB ACCESS -->
+    <div class="section" id="web-access">
+      <div class="section-header">
+        <span class="section-num">07</span>
+        <h2>Веб-кабинет — Доступ и вход</h2>
+      </div>
+
+      <h3>Как открыть</h3>
+      <p>Введите IP-адрес устройства в браузере или используйте mDNS-адрес: <code>http://t-disp-totp.local</code> (имя хоста настраивается в Настройках).</p>
+      <p>В режиме AP captive portal открывается автоматически при подключении к WiFi-сети устройства.</p>
+
+      <h3>Регистрация</h3>
+      <p>При первом входе устройство перенаправляет на страницу регистрации. Создайте имя пользователя и пароль, затем войдите с теми же данными.</p>
+
+      <div class="callout callout-warn">
+        <strong>Известная ошибка</strong>
+        Страница регистрации или входа может отображаться пустой при первой загрузке. Обновите страницу — она отобразится корректно.
+      </div>
+
+      <div class="callout callout-danger">
+        <strong>Попытки входа</strong>
+        Несколько неудачных попыток входа заблокируют доступ до перезагрузки устройства.
+      </div>
+    </div>
+
+    <!-- WIDGET BAR -->
+    <div class="section" id="widget-bar">
+      <div class="section-header">
+        <span class="section-num">07b</span>
+        <h2>Виджет-бар</h2>
+      </div>
+
+      <p>Виджет-бар — тонкая полоска в верхней части интерфейса веб-кабинета. Содержит два элемента по разным сторонам.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Элемент</th><th>Расположение</th><th>Описание</th></tr></thead>
+          <tbody>
+            <tr><td>🔋 Батарея</td><td>Левая сторона</td><td>Показывает текущий уровень заряда аккумулятора (устройство должно иметь подключённый LiPo-аккумулятор 3.7В). Отображает процент и напряжение. При зарядке показывается анимированная иконка.</td></tr>
+            <tr><td>🌐 Язык</td><td>Правая сторона</td><td>Иконка флага с выпадающим меню — переключение языка интерфейса веб-кабинета. Доступные языки: английский, русский, немецкий, китайский, испанский. Выбор сохраняется в браузере и сохраняется между сессиями.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout-info">
+        <strong>Переключатель языка</strong>
+        Смена языка мгновенно обновляет все надписи, кнопки и уведомления — перезагрузка страницы не требуется. Настройка хранится в браузере, не на устройстве.
+      </div>
+    </div>
+
+    <!-- KEYS -->
+    <div class="section" id="keys">
+      <div class="section-header">
+        <span class="section-num">08</span>
+        <h2>Ключи — TOTP &amp; HOTP</h2>
+      </div>
+
+      <h3>Добавление ключа</h3>
+      <p>Введите имя и секретный ключ. Настройки по умолчанию: TOTP, SHA1, 6 цифр, интервал 30 секунд.</p>
+      <p>Нажмите <strong>Дополнительные настройки</strong> для изменения:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Параметр</th><th>Варианты</th></tr></thead>
+          <tbody>
+            <tr><td>Тип</td><td>TOTP, HOTP</td></tr>
+            <tr><td>Алгоритм</td><td>SHA1, SHA256, SHA512</td></tr>
+            <tr><td>Длина кода</td><td>6 или 8 цифр</td></tr>
+            <tr><td>Интервал TOTP</td><td>30 или 60 секунд</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Ключ также можно добавить, загрузив скриншот его QR-кода.</p>
+
+      <h3>Действия с ключами</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Действие</th><th>Результат</th></tr></thead>
+          <tbody>
+            <tr><td>Нажать на код</td><td>Скопировать код в буфер обмена</td></tr>
+            <tr><td>Кнопка QR</td><td>Показать QR-код на экране устройства на 30 секунд — отсканируйте для экспорта в другое приложение-аутентификатор</td></tr>
+            <tr><td>Далее (только HOTP)</td><td>Увеличить счётчик и сгенерировать следующий код</td></tr>
+            <tr><td>Удалить</td><td>Удалить ключ навсегда</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout-info">
+        <strong>Сканирование QR</strong>
+        Экран устройства небольшой. Включите фонарик на телефоне и приблизьтесь для чёткого сканирования.
+      </div>
+
+      <h3>Экспорт и импорт</h3>
+      <ol class="steps">
+        <li>Нажмите <strong>Активировать экспорт</strong> и введите пароль веб-кабинета</li>
+        <li>Выберите ключи для экспорта и нажмите <strong>Экспорт</strong> — скачается файл <code>.enc</code></li>
+        <li>Для импорта: активируйте экспорт снова, нажмите <strong>Импорт</strong>, загрузите файл <code>.enc</code></li>
+      </ol>
+      <p>Файл <code>.enc</code> также можно открыть в <code>decrypt_export.html</code> (корень проекта) — офлайн-редактор для просмотра, расшифровки и редактирования ключей на компьютере.</p>
+    </div>
+
+    <!-- PASSWORDS -->
+    <div class="section" id="passwords">
+      <div class="section-header">
+        <span class="section-num">09</span>
+        <h2>Пароли</h2>
+      </div>
+
+      <h3>Добавление пароля</h3>
+      <p>Введите имя и пароль. Используйте значок генератора для создания пароля:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Элемент</th><th>Функция</th></tr></thead>
+          <tbody>
+            <tr><td>Ползунок</td><td>Длина пароля: 1 – 64 символа</td></tr>
+            <tr><td>Сгенерировать</td><td>Сгенерировать новый случайный пароль</td></tr>
+            <tr><td>Сохранить</td><td>Скопировать сгенерированный пароль в поле ввода</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Нажмите <strong>Сохранить пароль</strong> для добавления в список.</p>
+
+      <h3>Действия с паролями</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Кнопка</th><th>Действие</th></tr></thead>
+          <tbody>
+            <tr><td>Копировать</td><td>Безопасно получить пароль с устройства и скопировать в буфер обмена</td></tr>
+            <tr><td>Изменить</td><td>Открыть форму редактирования — изменить имя или пароль и сохранить</td></tr>
+            <tr><td>Удалить</td><td>Удалить пароль навсегда</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Экспорт и импорт</h3>
+      <p>Работает идентично экспорту ключей — активировать, ввести пароль, скачать файл <code>.enc</code>. Совместимо с <code>decrypt_export.html</code>.</p>
+    </div>
+
+    <!-- DISPLAY -->
+    <div class="section" id="display">
+      <div class="section-header">
+        <span class="section-num">10</span>
+        <h2>Настройки экрана</h2>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Настройка</th><th>Варианты</th></tr></thead>
+          <tbody>
+            <tr><td>Тема</td><td>Светлая, Тёмная</td></tr>
+            <tr><td>Часовой пояс</td><td>Используется для виджета часов на экране устройства</td></tr>
+            <tr><td>Заставка</td><td>Изображение при загрузке: SecureGen (оригинал), Blade Runner 2044, Combs</td></tr>
+            <tr><td>Тайм-аут экрана</td><td>Время до выключения дисплея и перехода в режим пониженного потребления (CPU замедляется до 40 МГц, контроллер TFT приостанавливается). Нажмите любую кнопку для пробуждения — PIN не требуется. Установите <strong>Никогда</strong> для постоянного включения экрана.</td></tr>
+            <tr><td>Автоблокировка</td><td>Время, после которого устройство переходит в глубокий сон и очищает все чувствительные данные из RAM. При пробуждении требуется PIN. Отсчёт от последней активности — начинается после перехода в псевдосон (если тайм-аут экрана включён) или напрямую от последнего нажатия кнопки (если тайм-аут экрана — Никогда). Должна быть больше тайм-аута экрана при ненулевых значениях обоих параметров. Установите <strong>Никогда</strong> для отключения. Пробуждение из глубокого сна: нажмите <span class="key">▼ Низ</span>.</td></tr>
+            <tr><td>Модуль DS3231 RTC</td><td>Внешние аппаратные часы. При включении устройство поддерживает точное время без WiFi. Необходим для TOTP в режимах AP и Офлайн. Настройте пины I2C (по умолчанию SDA=21, SCL=22) и нажмите <strong>Синхронизировать и сохранить</strong> для установки времени по часам браузера.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout callout-info">
+        <strong>Экран и блокировка</strong>
+        Тайм-аут экрана и автоблокировка настраиваются в одном блоке с единственной кнопкой <strong>Сохранить настройки</strong>. Оба параметра независимы — каждый можно установить в Никогда. Если автоблокировка меньше или равна тайм-ауту экрана, значение автоматически увеличивается в интерфейсе.
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Тайм-аут экрана</th><th>Автоблокировка</th><th>Поведение</th></tr></thead>
+          <tbody>
+            <tr><td>30 секунд</td><td>5 минут</td><td>Экран выключается через 30 с → глубокий сон через 5 мин без активности</td></tr>
+            <tr><td>Никогда</td><td>5 минут</td><td>Экран остаётся включённым → глубокий сон через 5 мин без нажатий кнопок</td></tr>
+            <tr><td>30 секунд</td><td>Никогда</td><td>Экран выключается через 30 с → псевдосон на неопределённое время, пробуждение по кнопке</td></tr>
+            <tr><td>Никогда</td><td>Никогда</td><td>Экран всегда включён, автосон и автоблокировка отключены</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- PIN -->
+    <div class="section" id="pin">
+      <div class="section-header">
+        <span class="section-num">11</span>
+        <h2>Настройки PIN</h2>
+      </div>
+
+      <h3>PIN устройства (шифрование при запуске)</h3>
+      <p>Управляет PIN-кодом, запрашиваемым при каждой загрузке. Этот PIN шифрует главный ключ устройства — от него зависят все сохранённые данные. Включён по умолчанию, создаётся при первом запуске.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Состояние</th><th>Эффект</th></tr></thead>
+          <tbody>
+            <tr><td>Включён</td><td>PIN требуется при запуске. Главный ключ зашифрован на диске.</td></tr>
+            <tr><td>Отключён</td><td>PIN не требуется при запуске. Главный ключ хранится незашифрованным — при краже устройства данные можно извлечь.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout-danger">
+        <strong>Важно</strong>
+        После отключения главный ключ нельзя перешифровать без сброса до заводских настроек. Сброс требует повторного импорта всех ключей и паролей из резервных копий.
+      </div>
+
+      <h3>PIN сопряжения BLE</h3>
+      <p>PIN, вводимый на телефоне при первом Bluetooth-сопряжении. Генерируется случайно при первом запуске. Можно изменить и сохранить здесь.</p>
+
+      <h3>Аппаратный PIN подтверждения BLE</h3>
+      <p>Дополнительный PIN, запрашиваемый на самом устройстве перед любой BLE-передачей пароля. Предотвращает несанкционированные передачи при доступе посторонних к устройству.</p>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="section" id="settings">
+      <div class="section-header">
+        <span class="section-num">12</span>
+        <h2>Настройки</h2>
+      </div>
+
+      <h3>Смена пароля веб-кабинета</h3>
+      <p>Требования: минимум 8 символов, заглавная буква, строчная буква, цифра, специальный символ (<code>!@#$%</code>).</p>
+
+      <h3>Смена пароля AP</h3>
+      <p>Пароль собственной WiFi точки доступа устройства.</p>
+
+      <h3>Сеть WiFi</h3>
+      <p>Измените учётные данные WiFi-сети, к которой устройство подключается в режиме WiFi Client. Введите SSID сети (используйте кнопку <strong>Сканировать</strong> для поиска доступных сетей), пароль и подтверждение пароля, затем нажмите <strong>Сохранить данные WiFi</strong>.</p>
+      <div class="callout callout-info">
+        <strong>Примечание</strong>
+        Изменения вступают в силу после перезагрузки. Текущее соединение не прерывается.
+      </div>
+
+      <h3>Bluetooth</h3>
+      <p>Имя BLE-устройства — максимум 15 символов. Это имя отображается при сопряжении.</p>
+
+      <h3>mDNS</h3>
+      <p>Имя хоста для доступа в локальной сети. После сохранения устройство доступно по адресу <code>http://&lt;hostname&gt;.local</code>.</p>
+
+      <h3>Режим запуска</h3>
+      <p>Экран по умолчанию при загрузке: просмотр TOTP/HOTP или менеджер паролей.</p>
+
+      <h3>Режим загрузки</h3>
+      <p>Сетевой режим по умолчанию при загрузке: WiFi Client, Режим AP или Офлайн. Выбранный режим становится дефолтным при тайм-ауте на экране выбора — два других режима остаются доступны через кнопки. Изменения вступают в силу при следующей перезагрузке. Заводской режим: WiFi Client.</p>
+
+      <h3>Автовыключение веб-сервера</h3>
+      <p>Автоматически останавливает веб-сервер после бездействия: 5 мин, 10 мин, 1 час или никогда.</p>
+
+      <h3>Таймер автовыхода</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Вариант</th><th>Поведение</th></tr></thead>
+          <tbody>
+            <tr><td>До перезагрузки</td><td>Сессия завершается при каждой перезагрузке устройства — требуется повторный вход</td></tr>
+            <tr><td>1 час / 6 часов / 24 часа / 3 дня</td><td>Сессия сохраняется после перезагрузок на выбранный срок</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Управление устройством</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Кнопка</th><th>Действие</th></tr></thead>
+          <tbody>
+            <tr><td>Перезагрузить</td><td>Перезапустить устройство</td></tr>
+            <tr><td>Перезагрузить с веб-сервером</td><td>Перезапустить и автоматически включить веб-сервер при следующей загрузке</td></tr>
+            <tr><td>Очистить BLE-клиенты</td><td>Удалить все сохранённые Bluetooth-сопряжения</td></tr>
+            <tr><td>Выйти</td><td>Завершить текущую сессию веб-кабинета</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+  // Active nav highlighting on scroll
+  const sections = document.querySelectorAll('.section');
+  const links = document.querySelectorAll('.nav-link');
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const active = document.querySelector(`.nav-link[href="#${entry.target.id}"]`);
+        if (active) active.classList.add('active');
+      }
+    });
+  }, { threshold: 0.3 });
+
+  sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>

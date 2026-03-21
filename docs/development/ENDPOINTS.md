@@ -160,7 +160,21 @@ Get or set display theme.
 Values: `"dark"`, `"light"`.
 
 ### GET|POST /api/display_settings 🔐 (🛡️ on POST) 🔒
-Get or set screen timeout (seconds) and brightness (0–255).
+Get or set screen timeout and auto lock timeout.
+
+GET response:
+```json
+{ "display_timeout": 30, "auto_lock_timeout": 300 }
+```
+
+`display_timeout` — seconds until screen turns off and device enters pseudo-sleep. `0` = Never.  
+Valid values: `0`, `15`, `30`, `60`, `300`, `1800`.
+
+`auto_lock_timeout` — seconds until device enters deep sleep and wipes RAM (requires PIN on wake). `0` = Never. Must be greater than `display_timeout` when both are non-zero. Auto lock timer starts from last activity — runs inside pseudo-sleep when `display_timeout > 0`, or directly in main loop when `display_timeout == 0`.  
+Valid values: `0`, `300`, `900`, `1800`, `3600`, `14400`.
+
+POST request: `{ "display_timeout": 30, "auto_lock_timeout": 300 }`  
+POST response: `{ "success": true, "message": "Display settings saved successfully!", "timeout": 30, "auto_lock_timeout": 300 }`
 
 ### GET|POST /api/clock_settings 🔐 (🛡️ on POST) 🔒
 Get or set POSIX timezone string.  
@@ -175,6 +189,15 @@ Get or set mDNS hostname (used as `<hostname>.local`).
 ### GET|POST /api/session_duration 🔐 (🛡️ on POST) 🔒
 Get or set session lifetime in hours.  
 Options: until reboot, 1, 6, 24, 72.
+
+### GET|POST /api/boot-mode 🔐 (🛡️ on POST) 🔒
+Get or set the default network mode used on boot timeout.
+
+GET response: `{ "boot_mode": "wifi" }`  
+POST request: `{ "boot_mode": "wifi" }` — accepted values: `"wifi"`, `"ap"`, `"offline"`.  
+POST response: `{ "success": true, "boot_mode": "wifi" }`
+
+The selected mode becomes the timeout default during the boot prompt (2-second window). The other two modes remain selectable via physical buttons. Takes effect on next reboot. Factory default: `"wifi"`.
 
 ---
 
@@ -192,6 +215,27 @@ Request: `{ "ble_pin_enabled": true, "ble_pin": "123456" }`
 ### POST /api/change_password 🔐 🛡️ 🔒
 Request: `{ "current_password": "...", "new_password": "..." }`
 
+### POST /api/wifi_credentials 🔐 🛡️ 🔒
+
+Updates the WiFi client credentials used when connecting to an external network.  
+Does not affect the current connection — changes apply after reboot.
+
+Request:
+```json
+{
+  "ssid": "MyNetwork",
+  "password": "secret123",
+  "confirm_password": "secret123"
+}
+```
+
+Validation: `ssid` required; `password` must match `confirm_password`; if password  
+is non-empty, minimum 8 characters (empty password = open network).
+
+Response 200: `{ "success": true, "message": "WiFi credentials saved. Reboot to apply." }`  
+Response 400: `{ "success": false, "message": "..." }` — validation error  
+Response 500: `{ "success": false, "message": "Failed to save WiFi credentials" }`
+
 ### POST /api/change_ap_password 🔐 🛡️ 🔒
 Request: `{ "new_password": "..." }`
 
@@ -208,6 +252,22 @@ Resets the web server auto-shutdown timer. Called periodically by the frontend.
 
 ### POST /api/clear_ble_clients 🔐 🛡️ 🔒
 Clears all BLE bonded devices.
+
+### GET /api/battery 🔐 🔒
+Returns current battery status. Polled by the web UI every 30 seconds.
+
+Response 200:
+```json
+{ "level": 87, "charging": false }
+```
+
+`level` — integer 0–100. Derived from voltage range 3200–3800 mV mapped linearly.  
+`charging` — bool. `true` if measured voltage exceeds 4.15 V (threshold-based, no dedicated pin).
+
+Response 503: `{ "error": "Battery manager not available" }`
+
+> Note: CSRF token is not required — this is a read-only GET endpoint. Authentication
+> is verified at the tunnel dispatcher outer level, not inside the endpoint handler.
 
 ---
 
