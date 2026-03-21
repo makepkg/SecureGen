@@ -30,10 +30,6 @@ import Layout from '../layouts/Layout.astro';
 
       <div class="divider"></div>
 
-      <label class="select-label" data-i18n="label.version">Firmware Version</label>
-      <select id="version-select" class="select-input">
-        <option disabled selected>Loading versions...</option>
-      </select>
       <p id="version-info" class="select-description"></p>
 
       <div class="divider"></div>
@@ -408,7 +404,7 @@ import Layout from '../layouts/Layout.astro';
   let selectedVersion = 'latest';
 
   async function init() {
-    await Promise.all([loadBoards(), loadReleases()]);
+    await Promise.all([loadBoards(), loadLatestRelease()]);
     setupEventListeners();
     updateManifest();
   }
@@ -439,40 +435,16 @@ import Layout from '../layouts/Layout.astro';
     }
   }
 
-  async function loadReleases() {
+  async function loadLatestRelease() {
     try {
-      const response = await fetch(`https://api.github.com/repos/${REPO}/releases`);
-      if (!response.ok) throw new Error('Failed to fetch releases');
+      const response = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
+      if (!response.ok) throw new Error('Failed to fetch latest release');
       
-      releases = await response.json();
-      
-      const versionSelect = document.getElementById('version-select');
-      if (versionSelect && releases.length > 0) {
-        const latestRelease = releases[0];
-        const options = [
-          `<option value="latest">Latest (${latestRelease.tag_name})</option>`
-        ];
-        
-        releases.forEach(release => {
-          const date = new Date(release.published_at);
-          const formattedDate = date.toLocaleDateString('en-US', { 
-            day: 'numeric', 
-            month: 'short', 
-            year: 'numeric' 
-          });
-          const label = `${release.tag_name} · ${formattedDate}${release.name ? ' · ' + release.name : ''}`;
-          options.push(`<option value="${release.tag_name}">${label}</option>`);
-        });
-        
-        versionSelect.innerHTML = options.join('');
-        updateVersionInfo();
-      }
+      const release = await response.json();
+      releases = [release];
+      updateVersionInfo();
     } catch (err) {
-      console.error('Failed to load releases:', err);
-      const versionSelect = document.getElementById('version-select');
-      if (versionSelect) {
-        versionSelect.innerHTML = '<option disabled>Failed to load versions</option>';
-      }
+      console.error('Failed to load latest release:', err);
     }
   }
 
@@ -487,48 +459,38 @@ import Layout from '../layouts/Layout.astro';
     const versionInfo = document.getElementById('version-info');
     if (!versionInfo || releases.length === 0) return;
     
-    const release = selectedVersion === 'latest' 
-      ? releases[0] 
-      : releases.find(r => r.tag_name === selectedVersion);
+    const release = releases[0];
     
     if (release) {
       const date = new Date(release.published_at);
-      const formattedDate = date.toLocaleDateString('en-US', { 
-        day: 'numeric', 
-        month: 'short', 
-        year: 'numeric' 
+      const formattedDate = date.toLocaleDateString('en-US', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
       });
       
-      versionInfo.innerHTML = `
-        Released ${formattedDate} · 
-        <a href="https://github.com/${REPO}/releases/tag/${release.tag_name}" target="_blank" rel="noopener noreferrer">
-          Release notes →
-        </a>
-      `;
+      versionInfo.innerHTML = `${release.tag_name} · Released ${formattedDate} · <a href="https://github.com/${REPO}/releases/tag/${release.tag_name}" target="_blank" rel="noopener noreferrer">Release notes →</a>`;
     }
   }
 
+  // 🔧 RELEASE CHECKLIST: When releasing a new version, manifest.json
+  // is updated automatically by the GitHub Actions workflow.
+  // The cache-bust version below is set dynamically from the latest release tag.
   function updateManifest() {
     const flashButton = document.getElementById('flash-button');
     if (flashButton) {
-      flashButton.setAttribute('manifest', '/SecureGen/firmware/manifest.json');
+      const tag = releases[0]?.tag_name || 'latest';
+      flashButton.setAttribute('manifest', `/SecureGen/firmware/manifest.json?v=${tag}`);
     }
   }
 
   function setupEventListeners() {
     const boardSelect = document.getElementById('board-select');
-    const versionSelect = document.getElementById('version-select');
     
     boardSelect?.addEventListener('change', (e) => {
       const boardId = (e.target as HTMLSelectElement).value;
       selectedBoard = boards.find(b => b.id === boardId) || null;
       updateBoardDescription();
-      updateManifest();
-    });
-    
-    versionSelect?.addEventListener('change', (e) => {
-      selectedVersion = (e.target as HTMLSelectElement).value;
-      updateVersionInfo();
       updateManifest();
     });
 
