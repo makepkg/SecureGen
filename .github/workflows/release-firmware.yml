@@ -32,10 +32,13 @@ jobs:
       - name: Install PlatformIO and esptool
         run: pip install platformio esptool
 
-      - name: Build firmware
+      - name: Build firmware (T-Display)
         run: pio run -e lilygo-t-display
 
-      - name: Merge binaries
+      - name: Build firmware (T-Display S3)
+        run: pio run -e lilygo-t-display-s3
+
+      - name: Merge binaries (T-Display)
         run: |
           esptool --chip esp32 merge-bin \
             -o merged-firmware.bin \
@@ -46,9 +49,33 @@ jobs:
             0x8000 .pio/build/lilygo-t-display/partitions.bin \
             0x10000 .pio/build/lilygo-t-display/firmware.bin
 
+      - name: Merge binaries (T-Display S3)
+        run: |
+          esptool --chip esp32s3 merge-bin \
+            -o merged-firmware-s3.bin \
+            --flash-mode dio \
+            --flash-freq 80m \
+            --flash-size 16MB \
+            0x0 .pio/build/lilygo-t-display-s3/bootloader.bin \
+            0x8000 .pio/build/lilygo-t-display-s3/partitions.bin \
+            0x10000 .pio/build/lilygo-t-display-s3/firmware.bin
+
       - name: Copy binaries to website
         run: |
-          mkdir -p website/public/firmware
+          mkdir -p website/public/firmware/t-display
+          mkdir -p website/public/firmware/t-display-s3
+
+          cp .pio/build/lilygo-t-display/bootloader.bin website/public/firmware/t-display/bootloader.bin
+          cp .pio/build/lilygo-t-display/partitions.bin website/public/firmware/t-display/partitions.bin
+          cp .pio/build/lilygo-t-display/firmware.bin website/public/firmware/t-display/firmware.bin
+          cp merged-firmware.bin website/public/firmware/t-display/merged-firmware.bin
+
+          cp .pio/build/lilygo-t-display-s3/bootloader.bin website/public/firmware/t-display-s3/bootloader.bin
+          cp .pio/build/lilygo-t-display-s3/partitions.bin website/public/firmware/t-display-s3/partitions.bin
+          cp .pio/build/lilygo-t-display-s3/firmware.bin website/public/firmware/t-display-s3/firmware.bin
+          cp merged-firmware-s3.bin website/public/firmware/t-display-s3/merged-firmware.bin
+
+          # Keep backward-compatible paths for existing T-Display users
           cp .pio/build/lilygo-t-display/bootloader.bin website/public/firmware/bootloader.bin
           cp .pio/build/lilygo-t-display/partitions.bin website/public/firmware/partitions.bin
           cp .pio/build/lilygo-t-display/firmware.bin website/public/firmware/firmware.bin
@@ -66,9 +93,17 @@ jobs:
               {
                 "chipFamily": "ESP32",
                 "parts": [
-                  { "path": "/SecureGen/firmware/bootloader.bin", "offset": 4096 },
-                  { "path": "/SecureGen/firmware/partitions.bin", "offset": 32768 },
-                  { "path": "/SecureGen/firmware/firmware.bin",   "offset": 65536 }
+                  { "path": "/SecureGen/firmware/t-display/bootloader.bin", "offset": 4096 },
+                  { "path": "/SecureGen/firmware/t-display/partitions.bin", "offset": 32768 },
+                  { "path": "/SecureGen/firmware/t-display/firmware.bin",   "offset": 65536 }
+                ]
+              },
+              {
+                "chipFamily": "ESP32-S3",
+                "parts": [
+                  { "path": "/SecureGen/firmware/t-display-s3/bootloader.bin", "offset": 0 },
+                  { "path": "/SecureGen/firmware/t-display-s3/partitions.bin", "offset": 32768 },
+                  { "path": "/SecureGen/firmware/t-display-s3/firmware.bin",   "offset": 65536 }
                 ]
               }
             ]
@@ -88,6 +123,10 @@ jobs:
         with:
           files: |
             merged-firmware.bin
+            merged-firmware-s3.bin
             .pio/build/lilygo-t-display/bootloader.bin
             .pio/build/lilygo-t-display/partitions.bin
             .pio/build/lilygo-t-display/firmware.bin
+            .pio/build/lilygo-t-display-s3/bootloader.bin
+            .pio/build/lilygo-t-display-s3/partitions.bin
+            .pio/build/lilygo-t-display-s3/firmware.bin
