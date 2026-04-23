@@ -1318,7 +1318,7 @@ void DisplayManager::showQRCode(const String& text, int timeoutSeconds) {
             keyName = keyName.substring(0, 27) + "...";
         }
         
-        tft.drawString(keyName, 120, 10);
+        tft.drawString(keyName, tft.width() / 2, 10);
     }
     
     // Generate and display QR code
@@ -1327,7 +1327,7 @@ void DisplayManager::showQRCode(const String& text, int timeoutSeconds) {
     qrcode.create(text);
     
     // Timer at bottom of screen
-    _qrCodeTimerY = 120;
+    _qrCodeTimerY = tft.height() - 15;
     updateQRTimer(timeoutSeconds);
     
     LOG_INFO("DisplayManager", "QR code displayed");
@@ -1336,14 +1336,14 @@ void DisplayManager::showQRCode(const String& text, int timeoutSeconds) {
 void DisplayManager::updateQRTimer(int secondsRemaining) {
     // Clear only timer area
     int timerWidth = 40;
-    int timerX = (240 - timerWidth) / 2;
+    int timerX = (tft.width() - timerWidth) / 2;
     tft.fillRect(timerX - 5, _qrCodeTimerY - 10, timerWidth + 10, 15, _currentThemeColors->background_dark);
     
     // Draw updated timer (centered)
     tft.setTextColor(_currentThemeColors->text_secondary, _currentThemeColors->background_dark);
     tft.setTextSize(1);
     tft.setTextDatum(MC_DATUM);
-    tft.drawString(String(secondsRemaining) + "s", 120, _qrCodeTimerY);
+    tft.drawString(String(secondsRemaining) + "s", tft.width() / 2, _qrCodeTimerY);
 }
 
 void DisplayManager::hideQRCode() {

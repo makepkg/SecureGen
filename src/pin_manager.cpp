@@ -431,6 +431,7 @@ bool PinManager::requestDevicePin() {
     // Пытаемся разблокировать device key
     TFT_eSPI* tft = displayManager.getTft();
     int centerX = tft->width() / 2;
+    int centerY = tft->height() / 2;
     tft->setTextDatum(MC_DATUM);
     
     if (CryptoManager::getInstance().unlockDeviceKeyWithPin(enteredPin)) {
@@ -438,7 +439,7 @@ bool PinManager::requestDevicePin() {
         tft->fillScreen(TFT_BLACK);
         tft->setTextSize(3);
         tft->setTextColor(TFT_GREEN);
-        tft->drawString("PIN OK", centerX, 67);
+        tft->drawString("PIN OK", centerX, centerY);
         delay(1000);
         return true;
     } else {
@@ -446,7 +447,7 @@ bool PinManager::requestDevicePin() {
         tft->fillScreen(TFT_BLACK);
         tft->setTextSize(2);
         tft->setTextColor(TFT_RED);
-        tft->drawString("WRONG PIN!", centerX, 67);
+        tft->drawString("WRONG PIN!", centerX, centerY);
         delay(2000);
         return false;
     }
@@ -480,6 +481,7 @@ bool PinManager::requestDeviceBlePinForTransmission() {
     // Проверяем PIN через CryptoManager
     TFT_eSPI* tft = displayManager.getTft();
     int centerX = tft->width() / 2;
+    int centerY = tft->height() / 2;
     tft->setTextDatum(MC_DATUM);
     
     if (CryptoManager::getInstance().verifyDeviceBlePin(enteredPin)) {
@@ -487,7 +489,7 @@ bool PinManager::requestDeviceBlePinForTransmission() {
         tft->fillScreen(TFT_BLACK);
         tft->setTextSize(3);
         tft->setTextColor(TFT_GREEN);
-        tft->drawString("PIN OK", centerX, 67);
+        tft->drawString("PIN OK", centerX, centerY);
         delay(1000);
         return true;
     } else {
@@ -495,7 +497,7 @@ bool PinManager::requestDeviceBlePinForTransmission() {
         tft->fillScreen(TFT_BLACK);
         tft->setTextSize(2);
         tft->setTextColor(TFT_RED);
-        tft->drawString("WRONG PIN!", centerX, 67);
+        tft->drawString("WRONG PIN!", centerX, centerY);
         delay(2000);
         return false;
     }

@@ -704,7 +704,7 @@ void setup() {
 
     if (displayManager.isQRCodeActive())
       displayManager.hideQRCode();
-    displayManager.clearMessageArea(0, 0, 240, 135);
+    displayManager.clearMessageArea(0, 0, displayManager.getTft()->width(), displayManager.getTft()->height());
 
     // ❗ ПРОПУСКАЕМ WiFi подключение и синхронизацию времени
     // TOTP коды будут показывать "TIME NOT SYNCED"
@@ -731,7 +731,7 @@ void setup() {
         displayManager.showMessage("ERROR:", 10, 20, true, 2);
         displayManager.showMessage("WiFi reconnect failed!", 10, 40, false, 2);
         delay(2000);
-        displayManager.clearMessageArea(0, 0, 240, 135);
+        displayManager.clearMessageArea(0, 0, displayManager.getTft()->width(), displayManager.getTft()->height());
         WiFi.mode(WIFI_OFF);
       }
       timeSynced = totpGenerator.isTimeSynced();
@@ -752,7 +752,7 @@ void setup() {
     delay(3000);
 
     // Очистка экрана
-    displayManager.clearMessageArea(0, 0, 240, 135);
+    displayManager.clearMessageArea(0, 0, displayManager.getTft()->width(), displayManager.getTft()->height());
 
     // ❗ ПРОПУСКАЕМ: WiFi, веб-сервер, синхронизацию времени
     // Работают только: TOTP (несинхронизированный), пароли, BLE
@@ -930,7 +930,7 @@ void setup() {
 
   // ✅ displayManager.init() уже вызван - очищаем область сообщений перед
   // входом в основной цикл
-  displayManager.clearMessageArea(0, 0, 240, 60);
+  displayManager.clearMessageArea(0, 0, displayManager.getTft()->width(), 60);
 
   LOG_INFO("Main", "Main Loop Started");
   lastActivityTime = millis();
@@ -1509,8 +1509,9 @@ void loop() {
                 warningsShown = true;
 
                 TFT_eSPI *tft = displayManager.getTft();
+                int warnY = tft->height() - 60;
                 tft->fillRect(
-                    0, 115, tft->width(), 60,
+                    0, warnY, tft->width(), 60,
                     displayManager.getCurrentThemeColors()->background_dark);
 
                 tft->setTextDatum(MC_DATUM);
@@ -1518,11 +1519,10 @@ void loop() {
                     displayManager.getCurrentThemeColors()->text_secondary,
                     displayManager.getCurrentThemeColors()->background_dark);
                 tft->setTextSize(1);
-                tft->drawString("⚠️ Connect to network", tft->width() / 2, 120);
-                tft->drawString("for time sync", tft->width() / 2, 135);
-                tft->drawString("or switch to passwords", tft->width() / 2,
-                                150);
-                tft->drawString("(Hold BTN1)", tft->width() / 2, 165);
+                tft->drawString("⚠️ Connect to network", tft->width() / 2, warnY + 5);
+                tft->drawString("for time sync", tft->width() / 2, warnY + 20);
+                tft->drawString("or switch to passwords", tft->width() / 2, warnY + 30);
+                tft->drawString("(Hold BTN1)", tft->width() / 2, warnY + 40);
               }
             }
           } else {

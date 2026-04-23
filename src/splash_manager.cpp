@@ -47,7 +47,10 @@ void SplashScreenManager::displayEmbeddedSplash(const String& mode) {
     if (imageBuffer) {
         // 🌌 ШАГ 1: Отобразить изображение (экран уже чёрный, яркость 0 из initForSplash)
         memcpy_P(imageBuffer, splashData, splashLen);
-        _displayManager.getTft()->pushImage(0, 0, 
+        TFT_eSPI* tft = _displayManager.getTft();
+        int offsetX = (tft->width() - SPLASH_IMAGE_WIDTH) / 2;
+        int offsetY = (tft->height() - SPLASH_IMAGE_HEIGHT) / 2;
+        tft->pushImage(offsetX, offsetY,
             SPLASH_IMAGE_WIDTH, SPLASH_IMAGE_HEIGHT, imageBuffer);
         free(imageBuffer);
         

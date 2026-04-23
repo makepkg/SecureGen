@@ -6,6 +6,7 @@
 
 // SPLASH_IMAGE_PATH is defined in config.h
 #define SPLASH_CONFIG_PATH "/splash_config.json"
+// Embedded splash images are always 240x135 RGB565
 #define SPLASH_IMAGE_WIDTH 240
 #define SPLASH_IMAGE_HEIGHT 135
 
