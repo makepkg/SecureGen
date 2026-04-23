@@ -5,8 +5,26 @@
 #define WEB_SERVER_PORT 80
 #define SESSION_TIMEOUT 900000 // 15 минут в миллисекундах
 
-// Дисплей - правильные пины для T-Display
-#define TFT_WIDTH 135 
+// ============================================================
+// Board-specific hardware configuration
+// ============================================================
+#if defined(BOARD_T_DISPLAY_S3)
+
+// T-Display S3: ESP32-S3, 170x320 ST7789 via 8-bit parallel
+// TFT pins are configured via build_flags for TFT_eSPI
+// BUTTON_1 (0) and BUTTON_2 (14) are defined by the board variant pins_arduino.h
+#define PIN_POWER_ON 15    // GPIO 15: LCD + battery power enable (must be HIGH)
+#define TFT_BL   38
+#define BATTERY_ADC_PIN    4
+#define BATTERY_POWER_PIN -1   // Divider always active on S3
+#define BATTERY_DIVIDER_RATIO 2000  // 2.0x (100K+100K divider), integer *1000
+#define WAKEUP_BUTTON_NUM  14
+
+#else
+
+// Original T-Display: ESP32, 135x240 ST7789 via SPI
+// Display - correct pins for T-Display
+#define TFT_WIDTH 135
 #define TFT_HEIGHT 240
 #define TFT_MOSI 19
 #define TFT_SCLK 18
@@ -15,10 +33,15 @@
 #define TFT_RST  23
 #define TFT_BL   4
 #define SPI_FREQUENCY 27000000
-
-// Кнопки для T-Display
+// Buttons for T-Display
 #define BUTTON_1 35
 #define BUTTON_2 0
+#define BATTERY_ADC_PIN    34
+#define BATTERY_POWER_PIN  14
+#define BATTERY_DIVIDER_RATIO 1826  // 1.826x divider, integer *1000
+#define WAKEUP_BUTTON_NUM  0
+
+#endif
 
 // TOTP настройки
 #define CONFIG_TOTP_STEP_SIZE 30

@@ -53,7 +53,7 @@ KeyManager keyManager;
 PasswordManager passwordManager;
 SplashScreenManager splashManager(displayManager);
 PinManager pinManager(displayManager);
-BatteryManager batteryManager(34, 14);
+BatteryManager batteryManager(BATTERY_ADC_PIN, BATTERY_POWER_PIN);
 BleKeyboardManager bleKeyboardManager(DEFAULT_BLE_DEVICE_NAME, "Lord", 100);
 WifiManager wifiManager(displayManager, configManager);
 TOTPGenerator totpGenerator;
