@@ -260,7 +260,6 @@ cd SecureGen
 ## 🗺️ Roadmap
 
 - Quick search by account name, favorites / pinned accounts, grouping by tags (work, personal, finance)
-- Adapt firmware for other ESP32  (T-Display-S3)
 - Informative setting flags in web cabinet
 - Flash encryption and secure boot (optional hardening)
 - Migration ECDH P-256 → X25519
