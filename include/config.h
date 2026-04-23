@@ -43,6 +43,16 @@
 
 #endif
 
+#include <esp_sleep.h>
+
+static inline void enable_deep_sleep_wakeup(void) {
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+    esp_sleep_enable_ext1_wakeup(1ULL << WAKEUP_BUTTON_NUM, ESP_EXT1_WAKEUP_ANY_LOW);
+#else
+    esp_sleep_enable_ext0_wakeup((gpio_num_t)WAKEUP_BUTTON_NUM, 0);
+#endif
+}
+
 // TOTP настройки
 #define CONFIG_TOTP_STEP_SIZE 30
 #define CONFIG_TOTP_DIGITS 6

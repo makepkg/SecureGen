@@ -270,6 +270,11 @@ void handleFactoryResetOnBoot() {
 }
 
 void setup() {
+#if defined(BOARD_T_DISPLAY_S3)
+  pinMode(PIN_POWER_ON, OUTPUT);
+  digitalWrite(PIN_POWER_ON, HIGH);
+#endif
+
   Serial.begin(115200);
   LogManager::getInstance().begin();
   LOG_INFO("Main", "T-Disp-TOTP Booting Up");
@@ -1123,7 +1128,7 @@ void handleButtons() {
       delay(1000);
       displayManager.turnOff();
       secureShutdown();
-      esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
+      enable_deep_sleep_wakeup();
       esp_deep_sleep_start();
     } else {
       unsigned long holdTime = millis() - button2PressStartTime;
@@ -1352,7 +1357,7 @@ void loop() {
     LOG_INFO("Main", "Auto lock timeout reached (screen=Never mode). Entering deep sleep.");
     displayManager.turnOff();
     secureShutdown();
-    esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
+    enable_deep_sleep_wakeup();
     esp_deep_sleep_start();
   }
 
@@ -1388,7 +1393,9 @@ void loop() {
     
     Serial.flush();
     setCpuFrequencyMhz(40);
+#if defined(CONFIG_IDF_TARGET_ESP32)
     Serial.updateBaudRate(115200);
+#endif
     
     unsigned long pseudoSleepStart = millis();
     
@@ -1399,11 +1406,13 @@ void loop() {
       if (autoLockSeconds > 0 &&
           (millis() - pseudoSleepStart > (autoLockSeconds * 1000UL))) {
         setCpuFrequencyMhz(240);
+#if defined(CONFIG_IDF_TARGET_ESP32)
         Serial.updateBaudRate(115200);
+#endif
         LOG_INFO("Main", "Auto lock timeout reached. Entering deep sleep.");
         displayManager.turnOff();
         secureShutdown();
-        esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
+        enable_deep_sleep_wakeup();
         esp_deep_sleep_start();
         // Never reaches here
       }
@@ -1419,7 +1428,9 @@ void loop() {
     
     // Exit pseudo-sleep: restore full CPU speed
     setCpuFrequencyMhz(240);
+#if defined(CONFIG_IDF_TARGET_ESP32)
     Serial.updateBaudRate(115200);
+#endif
     
     LOG_INFO("Main", "Woke up from pseudo-sleep.");
     lastActivityTime = millis();
