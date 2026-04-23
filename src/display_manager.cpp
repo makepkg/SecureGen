@@ -3,6 +3,22 @@
 #include "log_manager.h"
 #include <qrcode_espi.h>
 
+// LEDC API compatibility: Arduino ESP32 core 3.x moved to pin-based API
+#if ESP_ARDUINO_VERSION_MAJOR < 3
+#define BACKLIGHT_LEDC 0
+
+static inline void backlight_ledc_init(uint32_t freq, uint8_t bits) {
+    ledcSetup(BACKLIGHT_LEDC, freq, bits);
+    ledcAttachPin(TFT_BL, BACKLIGHT_LEDC);
+}
+#else
+#define BACKLIGHT_LEDC TFT_BL
+
+static inline void backlight_ledc_init(uint32_t freq, uint8_t bits) {
+    ledcAttach(TFT_BL, freq, bits);
+}
+#endif
+
 // Helper for the animation loop
 void schedule_next_update(DisplayManager* dm, AnimationManager* am);
 
@@ -131,10 +147,9 @@ void DisplayManager::initForSplash() {
     tft.fillScreen(TFT_BLACK); // Очищаем экран чёрным для splash
     tft.setTextDatum(MC_DATUM);
     
-    // ⚠️ ВАЖНО: Настройка PWM ПОСЛЕ tft.init() т.к. init() сбрасывает пин на digitalWrite!
-    ledcSetup(0, 5000, 8);
-    ledcAttachPin(TFT_BL, 0);
-    ledcWrite(0, 0); // Начинаем с погашенного экрана для fade эффекта
+    // ⚠️ IMPORTANT: Setup PWM AFTER tft.init() since init() resets pin to digitalWrite!
+    backlight_ledc_init(5000, 8);
+    ledcWrite(BACKLIGHT_LEDC, 0); // Start with backlight off for fade effect
 }
 
 // Полная инициализация (для обычного UI)
@@ -144,10 +159,9 @@ void DisplayManager::init() {
     tft.fillScreen(_currentThemeColors->background_dark); 
     tft.setTextDatum(MC_DATUM);
     
-    // ⚠️ ВАЖНО: Настройка PWM ПОСЛЕ tft.init() т.к. init() сбрасывает пин!
-    ledcSetup(0, 5000, 8);
-    ledcAttachPin(TFT_BL, 0);
-    ledcWrite(0, 255); // Полная яркость по умолчанию
+    // ⚠️ IMPORTANT: Setup PWM AFTER tft.init() since init() resets pin!
+    backlight_ledc_init(5000, 8);
+    ledcWrite(BACKLIGHT_LEDC, 255); // Full brightness by default
 
     headerSprite.createSprite(tft.width(), 35);
     headerSprite.setTextDatum(MC_DATUM);
@@ -682,16 +696,16 @@ void DisplayManager::showMessage(const String& text, int x, int y, bool isError,
 }
 
 void DisplayManager::turnOff() {
-  ledcWrite(0, 0);
+  ledcWrite(BACKLIGHT_LEDC, 0);
   tft.writecommand(0x10); // TFT_SLPIN — stops internal oscillator (~5mA saved)
 }
 
 void DisplayManager::turnOn() {
   tft.writecommand(0x11); // TFT_SLPOUT — restart internal oscillator
   delay(120);             // ST7789 requires 120ms after SLPOUT before commands
-  ledcWrite(0, 255);
+  ledcWrite(BACKLIGHT_LEDC, 255);
 }
-void DisplayManager::setBrightness(uint8_t brightness) { ledcWrite(0, brightness); }
+void DisplayManager::setBrightness(uint8_t brightness) { ledcWrite(BACKLIGHT_LEDC, brightness); }
 
 // 🔄 Обновление текста без полной перерисовки экрана
 void DisplayManager::updateMessage(const String& text, int x, int y, int size) {
