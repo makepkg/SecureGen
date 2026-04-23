@@ -2,8 +2,12 @@
 #define BATTERY_MANAGER_H
 
 #include <Arduino.h>
+#include "config.h"
+
+#if defined(CONFIG_IDF_TARGET_ESP32)
 #include "esp_adc_cal.h" // Required for ADC calibration
 #include "driver/adc.h"  // Required for ADC driver functions
+#endif
 
 class BatteryManager {
 public:
@@ -26,7 +30,9 @@ private:
     const float _maxVoltage = 3.8;
     const float _minVoltage = 3.2;
 
+#if defined(CONFIG_IDF_TARGET_ESP32)
     esp_adc_cal_characteristics_t _adc_chars; // ADC calibration characteristics
+#endif
 
     // ⚡ OPTIMIZED: Integer map function (5-10x быстрее float)
     int32_t imap(int32_t x, int32_t in_min, int32_t in_max, int32_t out_min, int32_t out_max);
