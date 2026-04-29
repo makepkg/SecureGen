@@ -141,17 +141,13 @@ jobs:
               {
                 "chipFamily": "ESP32",
                 "parts": [
-                  { "path": "/SecureGen/firmware/bootloader-esp32.bin", "offset": 4096 },
-                  { "path": "/SecureGen/firmware/partitions-esp32.bin", "offset": 32768 },
-                  { "path": "/SecureGen/firmware/firmware-esp32.bin",   "offset": 65536 }
+                  { "path": "/SecureGen/firmware/merged-firmware-esp32.bin", "offset": 0 }
                 ]
               },
               {
                 "chipFamily": "ESP32-S3",
                 "parts": [
-                  { "path": "/SecureGen/firmware/bootloader-s3.bin", "offset": 0 },
-                  { "path": "/SecureGen/firmware/partitions-s3.bin", "offset": 32768 },
-                  { "path": "/SecureGen/firmware/firmware-s3.bin",   "offset": 65536 }
+                  { "path": "/SecureGen/firmware/merged-firmware-s3.bin", "offset": 0 }
                 ]
               }
             ]
@@ -162,9 +158,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add website/public/firmware/
+          git add -f website/public/firmware/
           git commit -m "firmware: update binaries for ${{ github.ref_name }}" || true
-          git push
+          git push origin HEAD:master
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
