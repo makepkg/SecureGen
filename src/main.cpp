@@ -3,6 +3,11 @@
 #include "app_modes.h" // Используем новый общий заголовок
 #include "battery_manager.h"
 #include "ble_keyboard_manager.h"
+#ifdef BOARD_HAS_USB_HID
+#include "usb_hid_manager.h"
+UsbHidManager usbHidManager;
+#endif
+#include "board_config.h"
 #include "config.h"
 #include "config_manager.h"
 #include "crypto_manager.h"
@@ -53,8 +58,14 @@ KeyManager keyManager;
 PasswordManager passwordManager;
 SplashScreenManager splashManager(displayManager);
 PinManager pinManager(displayManager);
-BatteryManager batteryManager(34, 14);
+
+BatteryManager batteryManager(BATTERY_ADC_PIN, BATTERY_ADC_CH, BATTERY_POWER_PIN);
 BleKeyboardManager bleKeyboardManager(DEFAULT_BLE_DEVICE_NAME, "Lord", 100);
+
+#ifdef BOARD_HAS_USB_HID
+bool defaultHidIsBle = true;
+#endif
+
 WifiManager wifiManager(displayManager, configManager);
 TOTPGenerator totpGenerator;
 RTCManager rtcManager;
@@ -109,6 +120,7 @@ static int currentKeyIndex = 0;
 static int currentPasswordIndex = 0;
 static int previousKeyIndex = -1;
 static int previousPasswordIndex = -1;
+static uint32_t previousPwRevision = 0;
 unsigned long lastButtonPressTime = 0;
 const int debounceDelay = 300;
 const int factoryResetHoldTime = 5000;
@@ -129,6 +141,7 @@ static int chargeDisplayPct = -1;
 static bool isCharging = false;
 
 bool configPortalActive = false;
+bool isFirstTimeSetup = false;  // true = первая настройка (нет credentials), false = fallback (есть credentials но не подключилось)
 DNSServer adminDnsServer;
 StartupMode selectedMode = StartupMode::WIFI_MODE; // Default
 
@@ -151,27 +164,32 @@ void showWebServerInfoPage() {
   tft->setTextDatum(MC_DATUM); // Middle Center alignment
 
   // Title
+#ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+  int wsYOff = (tft->height() - 80) / 2 - 25;
+#else
+  int wsYOff = 0;
+#endif
   tft->setTextColor(colors->accent_primary, colors->background_dark);
   tft->setTextSize(2);
-  tft->drawString("Web Server Started!", tft->width() / 2, 25);
+  tft->drawString("Web Server Started!", tft->width() / 2, 25 + wsYOff);
 
   // IP Address
   String ip = wifiManager.getIP();
   tft->setTextColor(colors->text_primary, colors->background_dark);
   tft->setTextSize(2);
-  tft->drawString(ip, tft->width() / 2, 60);
+  tft->drawString(ip, tft->width() / 2, 60 + wsYOff);
 
   // Domain - защита от краша
   tft->setTextColor(colors->accent_secondary, colors->background_dark);
   tft->setTextSize(1);
   String mdnsHostname = configManager.loadMdnsHostname();
   mdnsHostname += ".local";
-  tft->drawString(mdnsHostname, tft->width() / 2, 85);
+  tft->drawString(mdnsHostname, tft->width() / 2, 85 + wsYOff);
 
   // Instructions
   tft->setTextColor(colors->text_secondary, colors->background_dark);
   tft->setTextSize(1);
-  tft->drawString("Ready for connections", tft->width() / 2, 105);
+  tft->drawString("Ready for connections", tft->width() / 2, 105 + wsYOff);
 
   // 🌌 Плавное появление
   for (int i = 0; i <= 255; i += 15) {
@@ -271,6 +289,10 @@ void handleFactoryResetOnBoot() {
 
 void setup() {
   Serial.begin(115200);
+#ifdef ARDUINO_USB_CDC_ON_BOOT
+  // S3 native USB: don't block boot if no USB host connected
+  { uint32_t _t = millis(); while (!Serial && (millis() - _t) < 1500) { delay(10); } }
+#endif
   LogManager::getInstance().begin();
   LOG_INFO("Main", "T-Disp-TOTP Booting Up");
 
@@ -496,9 +518,17 @@ void setup() {
 
   // --- DS3231 RTC Init (all modes) ---
   rtcManager.loadConfig();
+#ifdef BOARD_HAS_USB_HID
+  defaultHidIsBle = (configManager.getDefaultHidMode() != "usb");
+#endif
   if (rtcManager.getConfig().enabled) {
     if (rtcManager.init()) {
       if (rtcManager.syncFromRTC()) {
+        String savedTz = configManager.getTimezone();
+        if (savedTz.length() > 0) {
+          setenv("TZ", savedTz.c_str(), 1);
+          tzset();
+        }
         LOG_INFO("Main", "System time set from DS3231 RTC");
       } else {
         LOG_WARNING("Main", "DS3231 found but time invalid — sync required");
@@ -583,14 +613,20 @@ void setup() {
 
       // Button hints — match PIN screen bottom button style
       // BTN1 hint (left side, like AP button in mode selection)
-      tft->fillRoundRect(8, H - 52, 106, 22, 6, t->background_light);
+#ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+      int btnL = (W - 224) / 2;
+#else
+      int btnL = 8;
+#endif
+      int btnR = btnL + 118;
+      tft->fillRoundRect(btnL, H - 52, 106, 22, 6, t->background_light);
       tft->setTextColor(t->text_primary, t->background_light);
-      tft->drawString("BTN1: WiFi QR", 8 + 53, H - 41);
+      tft->drawString("BTN1: WiFi QR", btnL + 53, H - 41);
 
       // BTN2 hint (right side, like Offline button in mode selection)
-      tft->fillRoundRect(126, H - 52, 106, 22, 6, t->accent_primary);
+      tft->fillRoundRect(btnR, H - 52, 106, 22, 6, t->accent_primary);
       tft->setTextColor(t->background_dark, t->accent_primary);
-      tft->drawString("BTN2: Continue", 126 + 53, H - 41);
+      tft->drawString("BTN2: Continue", btnR + 53, H - 41);
     };
 
     drawApInfoScreen();
@@ -598,24 +634,31 @@ void setup() {
     auto highlightButton = [&](int activeBtn) {
       TFT_eSPI *tft = displayManager.getTft();
       auto *t = displayManager.getCurrentThemeColors();
+      int W = tft->width();
       int H = tft->height();
+#ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+      int btnL = (W - 224) / 2;
+#else
+      int btnL = 8;
+#endif
+      int btnR = btnL + 118;
       // BTN1
       if (activeBtn == 1) {
-        tft->fillRoundRect(8, H - 52, 106, 22, 6, t->accent_primary);
+        tft->fillRoundRect(btnL, H - 52, 106, 22, 6, t->accent_primary);
         tft->setTextDatum(MC_DATUM);
         tft->setTextColor(t->background_dark, t->accent_primary);
-        tft->drawString("BTN1: WiFi QR", 8 + 53, H - 41);
-        tft->fillRoundRect(126, H - 52, 106, 22, 6, t->background_light);
+        tft->drawString("BTN1: WiFi QR", btnL + 53, H - 41);
+        tft->fillRoundRect(btnR, H - 52, 106, 22, 6, t->background_light);
         tft->setTextColor(t->text_primary, t->background_light);
-        tft->drawString("BTN2: Continue", 126 + 53, H - 41);
+        tft->drawString("BTN2: Continue", btnR + 53, H - 41);
       } else {
-        tft->fillRoundRect(8, H - 52, 106, 22, 6, t->background_light);
+        tft->fillRoundRect(btnL, H - 52, 106, 22, 6, t->background_light);
         tft->setTextDatum(MC_DATUM);
         tft->setTextColor(t->text_primary, t->background_light);
-        tft->drawString("BTN1: WiFi QR", 8 + 53, H - 41);
-        tft->fillRoundRect(126, H - 52, 106, 22, 6, t->accent_primary);
+        tft->drawString("BTN1: WiFi QR", btnL + 53, H - 41);
+        tft->fillRoundRect(btnR, H - 52, 106, 22, 6, t->accent_primary);
         tft->setTextColor(t->background_dark, t->accent_primary);
-        tft->drawString("BTN2: Continue", 126 + 53, H - 41);
+        tft->drawString("BTN2: Continue", btnR + 53, H - 41);
       }
     };
 
@@ -661,9 +704,14 @@ void setup() {
         tft->setTextDatum(MC_DATUM);
         tft->setTextSize(1);
         tft->setTextColor(secondsLeft <= 5 ? TFT_RED : TFT_YELLOW, TFT_BLACK);
-        tft->fillRect(0, 116, tft->width(), 14, TFT_BLACK);
+#ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+        int autoY = tft->height() - 70;
+#else
+        int autoY = 122;
+#endif
+        tft->fillRect(0, autoY - 6, tft->width(), 14, TFT_BLACK);
         tft->drawString("Auto: " + String(secondsLeft) + "s", tft->width() / 2,
-                        122);
+                        autoY);
       }
 
       if (digitalRead(BUTTON_1) == LOW) {
@@ -766,8 +814,17 @@ void setup() {
     displayManager.updateMessage("Connecting WiFi...", 10, 10, 2);
 
     if (!wifiManager.connect()) {
-      LOG_WARNING("Main",
-                  "No WiFi credentials found. Starting config portal...");
+      // Проверяем, есть ли сохраненные credentials
+      // Если нет - это первая настройка, если есть - это fallback после неудачного подключения
+      bool hasCredentials = LittleFS.exists(WIFI_CONFIG_FILE) || LittleFS.exists(WIFI_CONFIG_FILE_LEGACY);
+      
+      if (hasCredentials) {
+        LOG_WARNING("Main", "WiFi connection failed with saved credentials. Starting fallback config portal...");
+        isFirstTimeSetup = false;  // Это fallback - credentials есть, но подключение не удалось
+      } else {
+        LOG_WARNING("Main", "No WiFi credentials found. Starting first-time config portal...");
+        isFirstTimeSetup = true;  // Это первая настройка - credentials нет
+      }
 
       // 🚫 Отключаем watchdog перед Config Portal (иначе async_tcp вызывает
       // timeout)
@@ -845,6 +902,11 @@ void setup() {
     if (!timeSynced) {
       // Try DS3231 as fallback if NTP failed
       if (rtcManager.getConfig().enabled && rtcManager.isAvailable() && rtcManager.syncFromRTC()) {
+        String savedTz = configManager.getTimezone();
+        if (savedTz.length() > 0) {
+          setenv("TZ", savedTz.c_str(), 1);
+          tzset();
+        }
         timeSynced = true;
         LOG_INFO("Main", "Time recovered from DS3231 after NTP failure");
         displayManager.updateMessage("Time from RTC!", 10, 10, 2);
@@ -1004,10 +1066,22 @@ void handleButtons() {
         if (holdTime >= 2000) { // Если продержали 2с
           if (!bleActionTriggered) {
             bleActionTriggered = true;
-            currentMode = AppMode::BLE_ADVERTISING;
             previousPasswordIndex = -1;
-            LOG_INFO("Main",
-                     "Both buttons held. Switching to BLE_ADVERTISING mode");
+#ifdef BOARD_HAS_USB_HID
+            {
+              bool useBle = displayManager.drawHidPrompt(defaultHidIsBle);
+              if (useBle) {
+                currentMode = AppMode::BLE_ADVERTISING;
+                LOG_INFO("Main", "HID prompt: BLE selected");
+              } else {
+                currentMode = AppMode::USB_HID_SEND;
+                LOG_INFO("Main", "HID prompt: USB selected");
+              }
+            }
+#else
+            currentMode = AppMode::BLE_ADVERTISING;
+            LOG_INFO("Main", "Both buttons held. Switching to BLE_ADVERTISING mode");
+#endif
           }
         } else {
           // Рисуем лоадер для BLE
@@ -1081,7 +1155,7 @@ void handleButtons() {
       if (holdTime >= 1000 && holdTime < powerOffHoldTime) {
         int progress = map(holdTime - 1000, 0, 4000, 0, 100);
         String loaderText =
-            (currentMode == AppMode::TOTP) ? "Passwords..." : "TOTP...";
+            (currentMode == AppMode::TOTP) ? "Passwords..." : "TOTP/HOTP...";
         displayManager.drawGenericLoader(progress, loaderText);
       }
     }
@@ -1123,7 +1197,11 @@ void handleButtons() {
       delay(1000);
       displayManager.turnOff();
       secureShutdown();
+#ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+      esp_sleep_enable_ext1_wakeup((1ULL << GPIO_NUM_0), ESP_EXT1_WAKEUP_ANY_LOW);
+#else
       esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
+#endif
       esp_deep_sleep_start();
     } else {
       unsigned long holdTime = millis() - button2PressStartTime;
@@ -1204,6 +1282,91 @@ void checkScreenWakeup() {
 
 void loop() {
   if (configPortalActive) {
+    // ✅ Обработка BUTTON_2 для retry WiFi подключения
+    // ТОЛЬКО в fallback режиме (когда credentials уже есть)
+    if (!isFirstTimeSetup) {
+      static bool button2PreviousState = HIGH;
+      static bool retryInProgress = false;
+      bool button2Current = digitalRead(BUTTON_2);
+      
+      // Детект нажатия (переход HIGH → LOW)
+      if (button2PreviousState == HIGH && button2Current == LOW && !retryInProgress) {
+        delay(50);  // Debounce
+        
+        if (digitalRead(BUTTON_2) == LOW) {
+          retryInProgress = true;
+          LOG_INFO("Main", "BUTTON_2 pressed - retrying WiFi connection (fallback mode)");
+          
+          // Показываем сообщение
+          displayManager.init();
+          displayManager.showMessage("Retrying WiFi...", 10, 30, false, 2);
+          displayManager.showMessage("Please wait...", 10, 60, false, 1);
+          delay(1000);
+          
+          // Пытаемся подключиться (40 попыток, 20 секунд)
+          bool connected = wifiManager.connect();
+          
+          if (connected) {
+            // ✅ УСПЕХ - выходим из config portal
+            LOG_INFO("Main", "WiFi connected! IP: " + wifiManager.getIP());
+            
+            // Останавливаем config portal
+            webServerManager.stop();
+            wifiManager.stopConfigPortal();
+            
+            // Включаем watchdog обратно
+            esp_task_wdt_init(30, true);
+            esp_task_wdt_add(NULL);
+            LOG_INFO("Main", "Watchdog re-enabled after successful WiFi connection");
+            
+            // Сбрасываем флаги
+            configPortalActive = false;
+            isFirstTimeSetup = false;
+            
+            // Показываем успех
+            displayManager.init();
+            displayManager.showMessage("WiFi Connected!", 10, 30, false, 2);
+            displayManager.showMessage("IP: " + wifiManager.getIP(), 10, 60, false, 1);
+            delay(2000);
+            displayManager.init();
+            
+            // Продолжаем нормальную работу (выходим из loop, дальше обычная логика)
+            retryInProgress = false;
+            return;
+            
+          } else {
+            // ❌ НЕУДАЧА - восстанавливаем config portal
+            LOG_WARNING("Main", "WiFi retry failed - restoring config portal");
+            
+            // Восстанавливаем AP режим
+            WiFi.mode(WIFI_AP);
+            WiFi.softAP("ESP32-TOTP-Setup");
+            LOG_INFO("Main", "Access Point restored");
+            
+            // DNS продолжает работать, не нужно перезапускать
+            
+            // Показываем сообщение о неудаче
+            displayManager.init();
+            displayManager.showMessage("Connection Failed!", 10, 10, true, 2);
+            delay(1500);
+            
+            // Восстанавливаем экран config portal
+            displayManager.init();
+            displayManager.showMessage("WiFi Setup Mode", 10, 10, false, 2);
+            displayManager.showMessage("1. Connect to WiFi:", 10, 40);
+            displayManager.showMessage("ESP32-TOTP-Setup", 15, 60, false, 2);
+            displayManager.showMessage("2. Go to 192.168.4.1", 10, 90);
+            
+            retryInProgress = false;
+          }
+        }
+      }
+      
+      button2PreviousState = button2Current;
+    }
+    // else: первая настройка - кнопка BUTTON_2 не обрабатывается
+    
+    // ✅ EXISTING: Process DNS
     wifiManager.processDnsRequests();
     delay(1);
     return;
@@ -1223,6 +1386,9 @@ void loop() {
     pendingThemeChange = false;
     LOG_INFO("Main", "Applying pending theme change from web server");
     displayManager.setTheme(pendingTheme);
+    previousKeyIndex = -1;
+    previousPasswordIndex = -1;
+    displayManager.resetLoaderState();
   }
 
   // НОВАЯ ЛОГИКА: Проверка флага отключения PIN (устанавливается веб-сервером)
@@ -1347,17 +1513,30 @@ void loop() {
   // When screen timeout > 0, auto lock runs inside pseudo-sleep polling loop
   uint32_t autoLockSecondsMain = configManager.getAutoLockTimeout();
   if (!webServerManager.isRunning() && screenTimeoutSeconds == 0 &&
-      !bleKeyboardManager.isConnected() && autoLockSecondsMain > 0 &&
+      !bleKeyboardManager.isConnected() &&
+#ifdef BOARD_HAS_USB_HID
+      !usbHidManager.isConnected() &&
+#endif
+      autoLockSecondsMain > 0 &&
       (millis() - lastActivityTime > (autoLockSecondsMain * 1000UL))) {
     LOG_INFO("Main", "Auto lock timeout reached (screen=Never mode). Entering deep sleep.");
     displayManager.turnOff();
     secureShutdown();
+#ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+    esp_sleep_enable_ext1_wakeup((1ULL << GPIO_NUM_0), ESP_EXT1_WAKEUP_ANY_LOW);
+#else
     esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
+#endif
     esp_deep_sleep_start();
   }
 
   if (!webServerManager.isRunning() && screenTimeoutSeconds > 0 && isScreenOn &&
       !bleKeyboardManager.isConnected() &&
+      currentMode != AppMode::BLE_ADVERTISING &&
+      currentMode != AppMode::BLE_PIN_ENTRY &&
+#ifdef BOARD_HAS_USB_HID
+      !usbHidManager.isConnected() &&
+#endif
       (millis() - lastActivityTime > (screenTimeoutSeconds * 1000))) {
 
     // Веб-сервер не активен - можно засыпать
@@ -1386,9 +1565,13 @@ void loop() {
     uint32_t autoLockSeconds = configManager.getAutoLockTimeout();
     LOG_INFO("Main", "Entering pseudo-sleep (40MHz CPU, display off, TFT sleep). AutoLock=" + String(autoLockSeconds) + "s");
     
+#ifndef ARDUINO_USB_CDC_ON_BOOT
     Serial.flush();
+#endif
     setCpuFrequencyMhz(40);
+#ifndef ARDUINO_USB_CDC_ON_BOOT
     Serial.updateBaudRate(115200);
+#endif
     
     unsigned long pseudoSleepStart = millis();
     
@@ -1399,11 +1582,17 @@ void loop() {
       if (autoLockSeconds > 0 &&
           (millis() - pseudoSleepStart > (autoLockSeconds * 1000UL))) {
         setCpuFrequencyMhz(240);
+#ifndef ARDUINO_USB_CDC_ON_BOOT
         Serial.updateBaudRate(115200);
+#endif
         LOG_INFO("Main", "Auto lock timeout reached. Entering deep sleep.");
         displayManager.turnOff();
         secureShutdown();
+#ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+        esp_sleep_enable_ext1_wakeup((1ULL << GPIO_NUM_0), ESP_EXT1_WAKEUP_ANY_LOW);
+#else
         esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
+#endif
         esp_deep_sleep_start();
         // Never reaches here
       }
@@ -1419,7 +1608,9 @@ void loop() {
     
     // Exit pseudo-sleep: restore full CPU speed
     setCpuFrequencyMhz(240);
+#ifndef ARDUINO_USB_CDC_ON_BOOT
     Serial.updateBaudRate(115200);
+#endif
     
     LOG_INFO("Main", "Woke up from pseudo-sleep.");
     lastActivityTime = millis();
@@ -1431,12 +1622,22 @@ void loop() {
     if (rtcManager.getConfig().enabled && rtcManager.isAvailable()) {
       delay(5);
       rtcManager.syncFromRTC();
+      String savedTz = configManager.getTimezone();
+      if (savedTz.length() > 0) {
+        setenv("TZ", savedTz.c_str(), 1);
+        tzset();
+      }
     }
   }
 
   if (isScreenOn) {
     // Пропускаем обновления если активен лоадер или QR код
-    if (!displayManager.isLoaderActive() && !displayManager.isQRCodeActive()) {
+#ifdef BOARD_HAS_USB_HID
+    bool _isUsbHidActive = (currentMode == AppMode::USB_HID_SEND);
+#else
+    bool _isUsbHidActive = false;
+#endif
+    if (!displayManager.isLoaderActive() && !displayManager.isQRCodeActive() && !_isUsbHidActive) {
       // Обновляем статус батареи по таймеру (общий для всех режимов)
       if (millis() - lastBatteryCheckTime > batteryCheckInterval) {
         lastBatteryCheckTime = millis();
@@ -1461,13 +1662,13 @@ void loop() {
         uint32_t freeHeap = ESP.getFreeHeap();
 
         // Только критические предупреждения для production
-        if (freeHeap < 15000) { // Меньше 15KB - критично!
+        if (freeHeap < 30000) { // Меньше 30KB - критично!
           LOG_CRITICAL("Memory",
                        "CRITICAL LOW MEMORY! Device may become unstable");
 
           // Принудительная очистка кэшей при критической нехватке памяти
-          if (freeHeap < 10000) {
-            ESP.restart(); // Аварийная перезагрузка при < 10KB
+          if (freeHeap < 20000) {
+            ESP.restart(); // Аварийная перезагрузка при < 20KB
           }
         }
       }
@@ -1542,12 +1743,64 @@ void loop() {
     case AppMode::PASSWORD: {
       auto passwords = passwordManager.getAllPasswords();
       if (!passwords.empty()) {
-        if (currentPasswordIndex != previousPasswordIndex) {
+        uint32_t pwRevision = passwordManager.getRevision();
+        if (currentPasswordIndex != previousPasswordIndex || pwRevision != previousPwRevision) {
+          previousPwRevision = pwRevision;
+          auto& curPwd = passwords[currentPasswordIndex];
+          // Check for duplicate pw_hash among all entries
+          bool isDup = false;
+          if (!curPwd.pw_hash.isEmpty()) {
+            for (int pi = 0; pi < (int)passwords.size(); pi++) {
+              if (pi != currentPasswordIndex &&
+                  passwords[pi].pw_hash == curPwd.pw_hash) {
+                isDup = true;
+                break;
+              }
+            }
+          }
+          
+          // PIN: only digits
+          bool isPin = false;
+          if (curPwd.password.length() > 0) {
+            isPin = true;
+            for (char c : curPwd.password) {
+              if (c < '0' || c > '9') { isPin = false; break; }
+            }
+          }
+          
+          // NAME: password contains entry name (case-insensitive)
+          bool isName = false;
+          if (curPwd.password.length() > 0 && curPwd.name.length() > 0) {
+            String pwLower = curPwd.password;
+            pwLower.toLowerCase();
+            String nameLower = curPwd.name;
+            nameLower.toLowerCase();
+            // Split name by non-alphanumeric separators, check each word >= 3 chars
+            String word = "";
+            for (int ci = 0; ci <= (int)nameLower.length(); ci++) {
+              char c = (ci < (int)nameLower.length()) ? nameLower[ci] : 0;
+              if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+                word += c;
+              } else {
+                if (word.length() >= 3 && pwLower.indexOf(word) >= 0) {
+                  isName = true;
+                  break;
+                }
+                word = "";
+              }
+            }
+          }
+          
           displayManager.drawPasswordLayout(
-              passwords[currentPasswordIndex].name,
-              passwords[currentPasswordIndex].password,
+              curPwd.name,
+              curPwd.password,
               chargeDisplayPct,
-              isCharging, webServerManager.isRunning());
+              isCharging,
+              webServerManager.isRunning(),
+              curPwd.strength,
+              isDup,
+              isPin,
+              isName);
           previousPasswordIndex = currentPasswordIndex;
         }
       } else {
@@ -1598,6 +1851,7 @@ void loop() {
         if (bleKeyboardManager.isSecure()) {
           LOG_INFO("Main", "BLE secure connection established");
           currentMode = AppMode::BLE_PIN_ENTRY;
+          lastActivityTime = millis(); // Reset timeout on PIN entry transition
           bleInitialized = false; // Reset for next time
           bleStartTime = 0;
         } else {
@@ -1641,6 +1895,7 @@ void loop() {
         bleActionTriggered = false;
         bleInitialized = false;
         bleStartTime = 0;
+        lastActivityTime = millis(); // Reset timeout — user just interacted
       }
     } break;
 
@@ -1703,6 +1958,7 @@ void loop() {
         bleKeyboardManager.end();
         bleActionTriggered = false;
         confirmPageDrawn = false;
+        lastActivityTime = millis(); // Reset timeout — user just interacted
       } else if (digitalRead(BUTTON_2) == LOW) { // Send button
         delay(200);
         LOG_INFO("Main", "Send button pressed. Sending data");
@@ -1721,6 +1977,77 @@ void loop() {
         previousPasswordIndex = -1; // Force redraw of confirm page
       }
     } break;
+
+#ifdef BOARD_HAS_USB_HID
+    case AppMode::USB_HID_SEND: {
+      static bool usbPageDrawn = false;
+      static String lastUsbStatusDrawn = "";
+      
+      auto passwords = passwordManager.getAllPasswords();
+      if (passwords.empty() || currentPasswordIndex >= (int)passwords.size()) {
+        currentMode = AppMode::PASSWORD;
+        bleActionTriggered = false;
+        usbPageDrawn = false;
+        displayManager.setUsbHidMode(false);
+        usbHidManager.end();
+        break;
+      }
+
+      if (!usbPageDrawn) {
+        usbHidManager.begin();
+        displayManager.setUsbHidMode(true);
+        displayManager.resetUsbHidPage();
+        delay(200);
+        usbPageDrawn = true;
+      }
+
+      String usbStatus = usbHidManager.isConnected() ? "USB Connected" : "Waiting for USB...";
+      String passwordName = passwords[currentPasswordIndex].name;
+      static String pendingUsbStatus = "";
+      static unsigned long pendingUsbStatusSince = 0;
+      if (usbStatus != pendingUsbStatus) {
+        pendingUsbStatus = usbStatus;
+        pendingUsbStatusSince = millis();
+      }
+      if (usbStatus != lastUsbStatusDrawn && millis() - pendingUsbStatusSince >= 300) {
+        displayManager.drawUsbHidPage(passwordName, usbStatus);
+        lastUsbStatusDrawn = usbStatus;
+      }
+
+      // BTN2 — отправить (правая)
+      if (digitalRead(BUTTON_2) == LOW) {
+        delay(50);
+        if (digitalRead(BUTTON_2) == LOW) {
+          String password = passwords[currentPasswordIndex].password;
+          displayManager.drawUsbHidPage(passwordName, "Sending...");
+          usbHidManager.sendPassword(password.c_str());
+          delay(500);
+        }
+      }
+
+      // BTN1 — назад (левая)
+      if (digitalRead(BUTTON_1) == LOW) {
+        delay(50);
+        if (digitalRead(BUTTON_1) == LOW) {
+          usbHidManager.end();
+          displayManager.setUsbHidMode(false);
+          bleActionTriggered = false;
+          usbPageDrawn = false;
+          lastUsbStatusDrawn = "";
+          pendingUsbStatus = "";
+          pendingUsbStatusSince = 0;
+          displayManager.resetUsbHidPage();
+          previousPasswordIndex = -1;
+          currentMode = AppMode::PASSWORD;
+        }
+      }
+
+      break;
+    }
+#endif
+
+    case AppMode::WIFI_CONFIG:
+      break;
     }
   }
 

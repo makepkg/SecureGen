@@ -1,4 +1,4 @@
-name: Build and Release Firmware
+name: Build & Release Firmware
 
 on:
   push:
@@ -11,6 +11,15 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - env: lilygo-t-display
+            chip: esp32
+            label: esp32
+          - env: lilygo-t-display-s3
+            chip: esp32s3
+            label: s3
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,44 +28,110 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache PlatformIO
-        uses: actions/cache@v4
+        uses: actions/cache@v3
         with:
           path: ~/.platformio
-          key: platformio-${{ hashFiles('platformio.ini') }}
+          key: pio-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install PlatformIO and esptool
+      - name: Install tools
         run: pip install platformio esptool
 
-      - name: Build firmware
-        run: pio run -e lilygo-t-display
+      - name: Build ${{ matrix.label }}
+        run: pio run -e ${{ matrix.env }}
 
       - name: Merge binaries
         run: |
-          esptool --chip esp32 merge-bin \
-            -o merged-firmware.bin \
-            --flash-mode dio \
-            --flash-freq 40m \
-            --flash-size 4MB \
-            0x1000 .pio/build/lilygo-t-display/bootloader.bin \
-            0x8000 .pio/build/lilygo-t-display/partitions.bin \
-            0x10000 .pio/build/lilygo-t-display/firmware.bin
+          if [ "${{ matrix.chip }}" = "esp32" ]; then
+            BOOTLOADER_OFFSET=0x1000
+          else
+            BOOTLOADER_OFFSET=0x0
+          fi
+          
+          esptool.py --chip ${{ matrix.chip }} merge_bin \
+            -o merged-firmware-${{ matrix.label }}.bin \
+            --flash_mode dio \
+            --flash_freq 80m \
+            --flash_size 16MB \
+            ${BOOTLOADER_OFFSET} .pio/build/${{ matrix.env }}/bootloader.bin \
+            0x8000  .pio/build/${{ matrix.env }}/partitions.bin \
+            0x10000 .pio/build/${{ matrix.env }}/firmware.bin
 
-      - name: Copy binaries to website
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist-${{ matrix.label }}
+          cp .pio/build/${{ matrix.env }}/bootloader.bin  dist-${{ matrix.label }}/bootloader-${{ matrix.label }}.bin
+          cp .pio/build/${{ matrix.env }}/partitions.bin  dist-${{ matrix.label }}/partitions-${{ matrix.label }}.bin
+          cp .pio/build/${{ matrix.env }}/firmware.bin    dist-${{ matrix.label }}/firmware-${{ matrix.label }}.bin
+          cp merged-firmware-${{ matrix.label }}.bin      dist-${{ matrix.label }}/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.label }}
+          path: dist-${{ matrix.label }}/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-firmware/
+
+      - name: Prepare website firmware folder
         run: |
           mkdir -p website/public/firmware
-          cp .pio/build/lilygo-t-display/bootloader.bin website/public/firmware/bootloader.bin
-          cp .pio/build/lilygo-t-display/partitions.bin website/public/firmware/partitions.bin
-          cp .pio/build/lilygo-t-display/firmware.bin website/public/firmware/firmware.bin
-          cp merged-firmware.bin website/public/firmware/merged-firmware.bin
+          cp all-firmware/firmware-esp32/* website/public/firmware/
+          cp all-firmware/firmware-s3/*    website/public/firmware/
 
-      - name: Update manifest version
+      - name: Generate boards.json
         run: |
-          TAG=${GITHUB_REF#refs/tags/}
+          cat > website/public/firmware/boards.json << 'EOF'
+          {
+            "boards": [
+              {
+                "id": "lilygo-t-display",
+                "name": "LILYGO T-Display ESP32",
+                "chip": "ESP32",
+                "description": "ESP32 with 1.14\" SPI display (135×240)",
+                "asset_prefix": "esp32",
+                "offsets": {
+                  "bootloader": 4096,
+                  "partitions": 32768,
+                  "firmware": 65536
+                }
+              },
+              {
+                "id": "lilygo-t-display-s3",
+                "name": "LILYGO T-Display-S3",
+                "chip": "ESP32-S3",
+                "description": "ESP32-S3 with 1.9\" parallel display (170×320), 8MB PSRAM, USB HID",
+                "asset_prefix": "s3",
+                "offsets": {
+                  "bootloader": 0,
+                  "partitions": 32768,
+                  "firmware": 65536
+                }
+              }
+            ]
+          }
+          EOF
+
+      - name: Generate manifest.json
+        run: |
+          TAG=${{ github.ref_name }}
           cat > website/public/firmware/manifest.json << EOF
           {
             "name": "SecureGen",
@@ -66,28 +141,36 @@ jobs:
               {
                 "chipFamily": "ESP32",
                 "parts": [
-                  { "path": "/SecureGen/firmware/bootloader.bin", "offset": 4096 },
-                  { "path": "/SecureGen/firmware/partitions.bin", "offset": 32768 },
-                  { "path": "/SecureGen/firmware/firmware.bin",   "offset": 65536 }
+                  { "path": "/SecureGen/firmware/bootloader-esp32.bin", "offset": 4096 },
+                  { "path": "/SecureGen/firmware/partitions-esp32.bin", "offset": 32768 },
+                  { "path": "/SecureGen/firmware/firmware-esp32.bin",   "offset": 65536 }
+                ]
+              },
+              {
+                "chipFamily": "ESP32-S3",
+                "parts": [
+                  { "path": "/SecureGen/firmware/bootloader-s3.bin", "offset": 0 },
+                  { "path": "/SecureGen/firmware/partitions-s3.bin", "offset": 32768 },
+                  { "path": "/SecureGen/firmware/firmware-s3.bin",   "offset": 65536 }
                 ]
               }
             ]
           }
           EOF
 
-      - name: Commit firmware to repo
+      - name: Commit firmware to website
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add website/public/firmware/
-          git commit -m "firmware: update binaries for ${GITHUB_REF#refs/tags/}"
-          git push origin master
+          git commit -m "firmware: update binaries for ${{ github.ref_name }}" || true
+          git push
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            merged-firmware.bin
-            .pio/build/lilygo-t-display/bootloader.bin
-            .pio/build/lilygo-t-display/partitions.bin
-            .pio/build/lilygo-t-display/firmware.bin
+            all-firmware/firmware-esp32/merged-firmware-esp32.bin
+            all-firmware/firmware-esp32/firmware-esp32.bin
+            all-firmware/firmware-s3/merged-firmware-s3.bin
+            all-firmware/firmware-s3/firmware-s3.bin

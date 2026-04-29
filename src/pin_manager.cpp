@@ -143,16 +143,24 @@ void PinManager::updatePinScreen(int currentPosition, int currentDigit, const St
     for (int i = 0; i < enteredPin.length(); i++) pinMask += "*";
     for (int i = 0; i < (currentPinLength - enteredPin.length()); i++) pinMask += ".";
     
+#ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+    int starsY    = tft->height() / 2 - 18;
+    int selectorY = tft->height() / 2 + 17;
+#else
+    int starsY    = 60;
+    int selectorY = 95;
+#endif
+
     tft->setTextDatum(MC_DATUM);
     tft->setTextSize(3);
-    tft->fillRect(0, 50, tft->width(), 24, TFT_BLACK);
-    tft->drawString(pinMask, centerX, 60);
+    tft->fillRect(0, starsY - 14, tft->width(), 28, TFT_BLACK);
+    tft->drawString(pinMask, centerX, starsY);
 
     // Обновляем только селектор цифр
     String selector = "< " + String(currentDigit) + " >";
     tft->setTextSize(2);
-    tft->fillRect(0, 85, tft->width(), 16, TFT_BLACK);
-    tft->drawString(selector, centerX, 95);
+    tft->fillRect(0, selectorY - 10, tft->width(), 20, TFT_BLACK);
+    tft->drawString(selector, centerX, selectorY);
 }
 
 String PinManager::requestPinInput(const String& title, bool isConfirmScreen) {
@@ -207,7 +215,11 @@ String PinManager::requestPinInput(const String& title, bool isConfirmScreen) {
                         delay(100);
                         // 3. Уходим в deep sleep
                         secureShutdown();
+#ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+                        esp_sleep_enable_ext1_wakeup((1ULL << GPIO_NUM_0), ESP_EXT1_WAKEUP_ANY_LOW);
+#else
                         esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
+#endif
                         esp_deep_sleep_start(); // Уходим в deep sleep до нажатия RST
                     }
                 }
@@ -470,10 +482,10 @@ bool PinManager::isPinEnabledForBle() {
 bool PinManager::requestDeviceBlePinForTransmission() {
     LOG_INFO("PinManager", "Requesting Device BLE PIN for password transmission");
     
-    // Запрашиваем PIN (всегда 6 цифр для Device BLE PIN)
-    String enteredPin = requestPinInput("Enter Device BLE PIN");
-    if (enteredPin.isEmpty()) {
-        LOG_WARNING("PinManager", "Device BLE PIN entry cancelled");
+    // Запрашиваем PIN (передаем true для активации "Hold both to go back")
+    String enteredPin = requestPinInput("Enter Device BLE PIN", true);
+    if (enteredPin.isEmpty() || enteredPin == "__BACK__") {
+        LOG_WARNING("PinManager", "Device BLE PIN entry cancelled by user");
         return false;
     }
     

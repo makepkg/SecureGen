@@ -72,6 +72,10 @@
   .num-col { color: var(--text2); font-size: 0.78rem; width: 32px; text-align: center; }
   .security-note { margin-top: 2rem; text-align: center; font-size: 0.76rem; color: var(--text2); opacity: 0.7; }
   .security-note span { color: var(--success); }
+  .strength-cell { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .lock-icon { font-size: 0.8rem; }
+  .lock-dim { opacity: 0.18; }
+  .dup-badge { display: inline-block; padding: 1px 5px; border-radius: 4px; font-size: 0.68rem; font-weight: 700; background: #3d2e00; color: #f5c55b; border: 1px solid #6b4e00; letter-spacing: 0.3px; }
   .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); align-items: center; justify-content: center; }
   .modal.show { display: flex; }
   .modal-content { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 2rem; width: 90%; max-width: 480px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); animation: modalSlide 0.2s ease-out; }
@@ -458,9 +462,13 @@ function renderTable(data) {
   body.innerHTML = '';
 
   if (isPasswords) {
-    head.innerHTML = `<tr><th>#</th><th>${tr('col.name')}</th><th>${tr('col.password')}</th><th></th></tr>`;
+    // Build duplicate map: password → count
+    const pwCounts = {};
+    data.forEach(item => { const p = item.password||''; pwCounts[p] = (pwCounts[p]||0)+1; });
+    head.innerHTML = `<tr><th>#</th><th>${tr('col.name')}</th><th>${tr('col.password')}</th><th>Strength</th><th></th></tr>`;
+    const strengthUpdaters = []; // array of functions to refresh each row's strength cell
     data.forEach((item, i) => {
-      const tr = document.createElement('tr');
+      const row = document.createElement('tr');
 
       const td0 = mkTd('num-col'); td0.textContent = i + 1;
 
@@ -473,12 +481,37 @@ function renderTable(data) {
       const wrap = document.createElement('div'); wrap.className = 'pw-cell-wrap';
       const pwInp = mkInput('pw-input', item.password || '');
       pwInp.type = 'password';
-      pwInp.addEventListener('input', () => { data[i].password = pwInp.value; });
+      // Register updater for this row
+      strengthUpdaters.push((counts) => {
+        const pw   = data[i].password || '';
+        const nm   = data[i].name || '';
+        const iDup  = pw.length > 0 && (counts[pw]||0) > 1;
+        const iPin  = pw.length > 0 && /^\d+$/.test(pw);
+        const iName = pw.length > 0 && nm.length > 0 &&
+                      nm.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3).some(w => pw.toLowerCase().includes(w));
+        tdS.innerHTML = renderLocks(calcStrength(pw), iDup, iPin, iName);
+      });
+      pwInp.addEventListener('input', () => {
+        data[i].password = pwInp.value;
+        // Rebuild counts and refresh ALL rows
+        const updatedCounts = {};
+        data.forEach(item => { const p = item.password||''; updatedCounts[p] = (updatedCounts[p]||0)+1; });
+        strengthUpdaters.forEach(fn => fn(updatedCounts));
+      });
       const revBtn = document.createElement('button'); revBtn.className = 'reveal-btn'; revBtn.textContent = '👁️';
       revBtn.addEventListener('click', () => {
         const h = pwInp.type === 'password'; pwInp.type = h ? 'text' : 'password'; revBtn.textContent = h ? '🙈' : '👁️';
       });
       wrap.append(pwInp, revBtn); td2.appendChild(wrap);
+
+      const tdS = mkTd();
+      const pw = item.password || '';
+      const strength = calcStrength(pw);
+      const isDup  = pw.length > 0 && (pwCounts[pw] || 0) > 1;
+      const isPin  = pw.length > 0 && /^\d+$/.test(pw);
+      const isName = pw.length > 0 && (item.name||'').length > 0 &&
+                     (item.name||'').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3).some(w => pw.toLowerCase().includes(w));
+      tdS.innerHTML = renderLocks(strength, isDup, isPin, isName);
 
       const td3 = mkTd();
       const copyBtn = document.createElement('button'); copyBtn.className = 'copy-btn'; copyBtn.textContent = '📋';
@@ -494,12 +527,12 @@ function renderTable(data) {
       });
       td3.append(copyBtn, delBtn);
 
-      tr.append(td0, td1, td2, td3); body.appendChild(tr);
+      row.append(td0, td1, td2, tdS, td3); body.appendChild(row);
     });
   } else {
     head.innerHTML = `<tr><th>#</th><th>${tr('col.name')}</th><th>${tr('col.secret')}</th><th>${tr('col.type')}</th><th>${tr('col.algorithm')}</th><th>${tr('col.digits')}</th><th>${tr('col.period')}</th><th></th></tr>`;
     data.forEach((item, i) => {
-      const tr = document.createElement('tr');
+      const row = document.createElement('tr');
 
       const td0 = mkTd('num-col'); td0.textContent = i + 1;
 
@@ -581,7 +614,7 @@ function renderTable(data) {
       });
       td7.append(copyBtn, delBtn);
 
-      tr.append(td0, td1, td2, td3, td4, td5, td6, td7); body.appendChild(tr);
+      row.append(td0, td1, td2, td3, td4, td5, td6, td7); body.appendChild(row);
     });
   }
 
@@ -683,6 +716,46 @@ document.getElementById('confirmPasswordBtn').addEventListener('click', async ()
     statusEl.className = 'error';
   }
 });
+
+// ── Password strength (mirrors device JS logic) ──
+function calcStrength(password) {
+  if (!password) return 0;
+  const len = password.length;
+  let score = 0;
+  if (len === 1) score = 1;
+  else if (len <= 4)  score = 1 + (len - 1) * 2;
+  else if (len <= 8)  score = 7 + (len - 4) * 3;
+  else if (len <= 12) score = 19 + (len - 8) * 4;
+  else if (len <= 20) score = 35 + (len - 12) * 2;
+  else if (len <= 32) score = 51 + (len - 20);
+  else                score = 63 + Math.min(len - 32, 32) * 0.5;
+  const hasL = /[a-z]/.test(password), hasU = /[A-Z]/.test(password);
+  const hasN = /[0-9]/.test(password), hasS = /[^a-zA-Z0-9]/.test(password);
+  const types = (hasL?1:0)+(hasU?1:0)+(hasN?1:0)+(hasS?1:0);
+  if (types === 2) score += 5;
+  else if (types === 3) score += 10;
+  else if (types === 4) score += 15;
+  if (len >= 20 && types === 4) score += 5;
+  score = Math.min(100, score);
+  if (score >= 50) return 3;
+  if (score >= 25) return 2;
+  return 1;
+}
+
+function renderLocks(strength, isDup, isPin, isName) {
+  const colors = ['#e74c3c', '#f39c12', '#f39c12'];
+  let html = '<div class="strength-cell">';
+  for (let i = 0; i < 3; i++) {
+    const active = i < strength;
+    const dim = active ? '' : ' lock-dim';
+    html += `<span class="lock-icon${dim}" style="color:${active ? colors[i] : 'inherit'}">🔒</span>`;
+  }
+  if (isDup)  html += '<span class="dup-badge">DUP</span>';
+  if (isPin)  html += '<span class="dup-badge" style="background:#3d0000;color:#ff6b6b;border-color:#800000">PIN</span>';
+  if (isName) html += '<span class="dup-badge" style="background:#3d1f00;color:#ffaa33;border-color:#7a3f00">NAME</span>';
+  html += '</div>';
+  return html;
+}
 
 // ── Helpers ──
 function mkTd(cls)        { const t = document.createElement('td'); if(cls) t.className = cls; return t; }

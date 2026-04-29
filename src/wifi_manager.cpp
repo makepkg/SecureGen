@@ -238,6 +238,22 @@ void WifiManager::disconnect() {
     LOG_INFO("WifiManager", "WiFi disconnected");
 }
 
+void WifiManager::stopConfigPortal() {
+    LOG_INFO("WifiManager", "Stopping config portal");
+    
+    // Stop DNS server
+    _dnsServer.stop();
+    LOG_DEBUG("WifiManager", "DNS server stopped");
+    
+    // Stop Access Point
+    WiFi.softAPdisconnect(true);
+    LOG_DEBUG("WifiManager", "Access Point stopped");
+    
+    // Turn off WiFi completely
+    WiFi.mode(WIFI_OFF);
+    LOG_INFO("WifiManager", "Config portal stopped");
+}
+
 void WifiManager::updateMdnsHostname() {
     String hostname = _configManager.loadMdnsHostname();
     MDNS.setInstanceName(hostname);

@@ -1,19 +1,22 @@
 #include "battery_manager.h"
 #include "log_manager.h"
+#include "board_config.h"
 
-BatteryManager::BatteryManager(int adcPin, int powerPin) : _adcPin(adcPin), _powerPin(powerPin) {}
+BatteryManager::BatteryManager(int adcPin, int adcChannel, int powerPin) : _adcPin(adcPin), _adcChannel(adcChannel), _powerPin(powerPin) {}
 
 void BatteryManager::begin() {
     LOG_INFO("BatteryManager", "Initializing battery monitoring");
-    pinMode(_powerPin, OUTPUT);
-    digitalWrite(_powerPin, LOW); // Убедимся, что питание делителя выключено по умолчанию
+    if (_powerPin >= 0) {
+        pinMode(_powerPin, OUTPUT);
+        digitalWrite(_powerPin, LOW);
+    }
 
     // Configure ADC
     adc1_config_width(ADC_WIDTH_BIT_12); // 12-bit resolution
-    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11); // GPIO 34 is ADC1_CHANNEL_6, 11dB attenuation
+    adc1_config_channel_atten((adc1_channel_t)_adcChannel, ADC_ATTEN_DB_12);
 
     // Characterize ADC for calibration
-    esp_adc_cal_value_t val_type = esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1100, &_adc_chars);
+    esp_adc_cal_value_t val_type = esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_12, ADC_WIDTH_BIT_12, 1100, &_adc_chars);
     if (val_type == ESP_ADC_CAL_VAL_EFUSE_VREF) {
         LOG_INFO("BatteryManager", "ADC calibration: eFuse Vref");
     } else if (val_type == ESP_ADC_CAL_VAL_EFUSE_TP) {
@@ -26,20 +29,20 @@ void BatteryManager::begin() {
 
 // ⚡ OPTIMIZED: Integer-only version (5x быстрее float!)
 uint32_t BatteryManager::getVoltageMv() {
-    digitalWrite(_powerPin, HIGH);
-    delay(10);
+    if (_powerPin >= 0) { digitalWrite(_powerPin, HIGH); delay(10); }
     
-    uint32_t adcRaw = adc1_get_raw(ADC1_CHANNEL_6);
+    uint32_t adcRaw = adc1_get_raw((adc1_channel_t)_adcChannel);
     if (adcRaw == 0) {
         LOG_WARNING("BatteryManager", "ADC reading returned 0");
     }
     
     uint32_t voltage_mv = esp_adc_cal_raw_to_voltage(adcRaw, &_adc_chars);
-    digitalWrite(_powerPin, LOW);
+    if (_powerPin >= 0) { digitalWrite(_powerPin, LOW); }
 
-    // ⚡ Integer math: (voltage_mv * 1826) / 1000 вместо float деления!
-    // 1.826 = 1826/1000, делитель напряжения
-    return (voltage_mv * 1826) / 1000;  // Pure integer math!
+    // ⚡ Integer math: voltage divider ratio (board-specific, defined in board_*.h)
+    // ESP32: 1826 (resistor divider on GPIO34)
+    // S3: 1890 (measured: 4.1V bat / 2.17V ADC = 1.89x)
+    return (voltage_mv * BATTERY_DIVIDER_RATIO) / 1000;
 }
 
 // Deprecated: старая float версия (для совместимости)

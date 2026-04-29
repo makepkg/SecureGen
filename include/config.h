@@ -5,20 +5,12 @@
 #define WEB_SERVER_PORT 80
 #define SESSION_TIMEOUT 900000 // 15 минут в миллисекундах
 
-// Дисплей - правильные пины для T-Display
-#define TFT_WIDTH 135 
-#define TFT_HEIGHT 240
-#define TFT_MOSI 19
-#define TFT_SCLK 18
-#define TFT_CS   5
-#define TFT_DC   16
-#define TFT_RST  23
-#define TFT_BL   4
-#define SPI_FREQUENCY 27000000
-
-// Кнопки для T-Display
-#define BUTTON_1 35
-#define BUTTON_2 0
+#include "board_config.h"
+// TFT pins are defined via platformio.ini build flags per board.
+// Do NOT hardcode TFT_WIDTH, TFT_HEIGHT, TFT_MOSI, TFT_SCLK,
+// TFT_CS, TFT_DC, TFT_RST, TFT_BL, SPI_FREQUENCY here.
+// BUTTON_1, BUTTON_2, BATTERY_ADC_PIN, BATTERY_ADC_CH,
+// BATTERY_POWER_PIN, WAKEUP_GPIO — all defined in board_config.h
 
 // TOTP настройки
 #define CONFIG_TOTP_STEP_SIZE 30

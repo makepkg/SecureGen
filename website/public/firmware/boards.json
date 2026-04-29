@@ -2,12 +2,24 @@
   "boards": [
     {
       "id": "lilygo-t-display",
-      "name": "LILYGO TTGO T-Display",
+      "name": "LILYGO T-Display ESP32",
       "chip": "ESP32",
-      "description": "ESP32 with 1.14\" TFT display",
-      "asset_prefix": "",
+      "description": "ESP32 with 1.14\" SPI display (135×240)",
+      "asset_prefix": "esp32",
       "offsets": {
         "bootloader": 4096,
+        "partitions": 32768,
+        "firmware": 65536
+      }
+    },
+    {
+      "id": "lilygo-t-display-s3",
+      "name": "LILYGO T-Display-S3",
+      "chip": "ESP32-S3",
+      "description": "ESP32-S3 with 1.9\" parallel display (170×320), 8MB PSRAM, USB HID",
+      "asset_prefix": "s3",
+      "offsets": {
+        "bootloader": 0,
         "partitions": 32768,
         "firmware": 65536
       }

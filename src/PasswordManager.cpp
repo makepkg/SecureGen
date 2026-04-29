@@ -1,4 +1,5 @@
 #include "PasswordManager.h"
+#include "mbedtls/sha256.h"
 #include <ArduinoJson.h>
 #include "LittleFS.h"
 #include "config.h"
@@ -15,9 +16,77 @@ void PasswordManager::begin() {
     LOG_INFO("PasswordManager", "Initializing...");
     if (loadPasswords()) {
         LOG_INFO("PasswordManager", "Initialized successfully");
+        if (_needsSave) {
+            savePasswords();
+            _needsSave = false;
+            LOG_INFO("PasswordManager", "Migrated legacy entries: strength/hash computed");
+        }
     } else {
         LOG_ERROR("PasswordManager", "Failed to load passwords during initialization");
     }
+}
+
+// Compute first 8 bytes of SHA256(password) as 16-char hex string
+// Used for duplicate detection — no full password recoverable from this
+String PasswordManager::computePwHash(const String& password) {
+    mbedtls_sha256_context ctx;
+    mbedtls_sha256_init(&ctx);
+    mbedtls_sha256_starts(&ctx, 0); // 0 = SHA256
+    mbedtls_sha256_update(&ctx,
+                          (const unsigned char*)password.c_str(), password.length());
+    unsigned char hash[32];
+    mbedtls_sha256_finish(&ctx, hash);
+    mbedtls_sha256_free(&ctx);
+    
+    // Return first 8 bytes as hex (16 chars) — enough for duplicate detection
+    String result = "";
+    for (int i = 0; i < 8; i++) {
+        if (hash[i] < 16) result += "0";
+        result += String(hash[i], HEX);
+    }
+    return result;
+}
+
+// Compute password strength score (mirrors JS calculatePasswordStrength logic)
+// Returns 1 (weak), 2 (medium), 3 (strong)
+uint8_t PasswordManager::computeStrength(const String& password) {
+    if (password.length() == 0) return 1;
+    
+    int len = password.length();
+    int score = 0;
+    
+    // Length score (mirrors JS)
+    if (len == 1) score = 1;
+    else if (len <= 4)  score = 1 + (len - 1) * 2;
+    else if (len <= 8)  score = 7 + (len - 4) * 3;
+    else if (len <= 12) score = 19 + (len - 8) * 4;
+    else if (len <= 20) score = 35 + (len - 12) * 2;
+    else if (len <= 32) score = 51 + (len - 20) * 1;
+    else                score = 63 + min((int)(len - 32), 32) / 2;
+    
+    // Character type bonus
+    bool hasLower   = false, hasUpper = false,
+         hasNumber  = false, hasSpecial = false;
+    for (char c : password) {
+        if (c >= 'a' && c <= 'z') hasLower = true;
+        else if (c >= 'A' && c <= 'Z') hasUpper = true;
+        else if (c >= '0' && c <= '9') hasNumber = true;
+        else hasSpecial = true;
+    }
+    int types = (hasLower?1:0)+(hasUpper?1:0)+(hasNumber?1:0)+(hasSpecial?1:0);
+    if (types == 2) score += 5;
+    else if (types == 3) score += 10;
+    else if (types == 4) score += 15;
+    
+    // Excellence bonus
+    if (len >= 20 && types == 4) score += 5;
+    
+    if (score > 100) score = 100;
+    
+    // Map to 3 levels
+    if (score >= 50) return 3; // strong / encryption
+    if (score >= 25) return 2; // medium
+    return 1;                  // weak
 }
 
 bool PasswordManager::addPassword(const String& name, const String& password) {
@@ -34,6 +103,9 @@ bool PasswordManager::addPassword(const String& name, const String& password) {
     newPassword.name = name;
     newPassword.password = password;
     newPassword.order = maxOrder + 1;
+    // Compute strength and hash before storing
+    newPassword.strength = computeStrength(password);
+    newPassword.pw_hash  = computePwHash(password);
     passwords.push_back(newPassword);
     LOG_INFO("PasswordManager", "Added password entry: [HIDDEN]");
     bool success = savePasswords();
@@ -54,6 +126,9 @@ bool PasswordManager::updatePassword(int index, const String& name, const String
     }
     passwords[index].name = name;
     passwords[index].password = password;
+    // Recompute strength and hash on update
+    passwords[index].strength = computeStrength(password);
+    passwords[index].pw_hash  = computePwHash(password);
     // порядок остается прежний
     LOG_INFO("PasswordManager", "Updated password entry at index " + String(index));
     bool success = savePasswords();
@@ -160,6 +235,8 @@ std::vector<PasswordEntry> PasswordManager::getAllPasswordsForExport() {
         entry.name = obj["name"].as<String>();
         entry.password = obj["password"].as<String>();
         entry.order = obj["order"] | 0;
+        entry.strength = obj["strength"] | 0;
+        entry.pw_hash = obj["pw_hash"] | "";
         exportPasswords.push_back(entry);
     }
 
@@ -184,6 +261,13 @@ bool PasswordManager::replaceAllPasswords(const String& jsonContent) {
         entry.name = obj["name"].as<String>();
         entry.password = obj["password"].as<String>();
         entry.order = obj["order"] | currentOrder++;  // Используем существующий order или назначаем по порядку
+        entry.strength = obj["strength"] | (uint8_t)0;
+        entry.pw_hash  = obj["pw_hash"] | String("");
+        // Recompute missing fields (handles legacy import files)
+        if (entry.strength == 0 || entry.pw_hash.isEmpty()) {
+            entry.strength = computeStrength(entry.password);
+            entry.pw_hash  = computePwHash(entry.password);
+        }
         passwords.push_back(entry);
     }
 
@@ -242,6 +326,14 @@ bool PasswordManager::loadPasswords() {
         entry.name = obj["name"].as<String>(); 
         entry.password = obj["password"].as<String>();
         entry.order = obj["order"] | currentOrder++;  // Используем существующий order или назначаем по порядку
+        entry.strength = obj["strength"] | 0;
+        entry.pw_hash = obj["pw_hash"] | "";
+        // Migration: compute missing fields for legacy entries
+        if (entry.strength == 0 || entry.pw_hash.isEmpty()) {
+            entry.strength = computeStrength(entry.password);
+            entry.pw_hash  = computePwHash(entry.password);
+            _needsSave = true;
+        }
         passwords.push_back(entry);
     }
 
@@ -256,9 +348,11 @@ bool PasswordManager::savePasswords() {
 
     for (const auto& entry : passwords) {
         JsonObject obj = array.add<JsonObject>();
-        obj["name"] = entry.name;
+        obj["name"]     = entry.name;
         obj["password"] = entry.password;
-        obj["order"] = entry.order;
+        obj["order"]    = entry.order;
+        obj["strength"] = entry.strength;
+        obj["pw_hash"]  = entry.pw_hash;
     }
 
     String jsonData;
@@ -283,6 +377,7 @@ bool PasswordManager::savePasswords() {
 
     size_t bytesWritten = file.print(encryptedData);
     file.close();
+    _revision++;
     
     if (bytesWritten > 0) {
         LOG_INFO("PasswordManager", "Saved " + String(passwords.size()) + " passwords successfully");

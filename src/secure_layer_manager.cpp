@@ -304,6 +304,10 @@ IRAM_ATTR bool SecureLayerManager::decryptRequest(const String& clientId, const 
     // 📉 Убран DEBUG лог - слишком часто вызывается
     
     // 🛡️ Увеличенный буфер для больших зашифрованных данных (POST с FormData)
+    if (ESP.getFreeHeap() < 20000) {
+        LOG_ERROR("SecureLayerManager", "Insufficient heap for JSON parse: " + String(ESP.getFreeHeap()) + "b");
+        return false;
+    }
     DynamicJsonDocument doc(1024); // 1KB для парсинга {type, data, iv, tag, counter}
     DeserializationError error = deserializeJson(doc, encryptedJson);
     if (error) {

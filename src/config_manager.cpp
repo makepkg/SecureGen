@@ -176,6 +176,48 @@ bool ConfigManager::saveStartupMode(const String& mode) {
     }
 }
 
+#ifdef BOARD_HAS_USB_HID
+String ConfigManager::getDefaultHidMode() {
+    if (LittleFS.exists(CONFIG_FILE)) {
+        fs::File configFile = LittleFS.open(CONFIG_FILE, "r");
+        if (configFile) {
+            JsonDocument doc;
+            if (deserializeJson(doc, configFile) == DeserializationError::Ok) {
+                String mode = doc["default_hid_mode"] | "ble";
+                configFile.close();
+                LOG_INFO("ConfigManager", "Loaded default HID mode: " + mode);
+                return mode;
+            }
+            configFile.close();
+        }
+    }
+    return "ble";
+}
+
+bool ConfigManager::saveDefaultHidMode(const String& mode) {
+    LOG_INFO("ConfigManager", "saveDefaultHidMode() called with mode: " + mode);
+    JsonDocument doc;
+    
+    if (LittleFS.exists(CONFIG_FILE)) {
+        fs::File configFile = LittleFS.open(CONFIG_FILE, "r");
+        if (configFile) {
+            deserializeJson(doc, configFile);
+            configFile.close();
+        }
+    }
+    
+    doc["default_hid_mode"] = mode;
+    
+    fs::File configFile = LittleFS.open(CONFIG_FILE, "w");
+    if (configFile) {
+        size_t bytesWritten = serializeJson(doc, configFile);
+        configFile.close();
+        return (bytesWritten > 0);
+    }
+    return false;
+}
+#endif
+
 String ConfigManager::getBootMode() {
     if (LittleFS.exists(CONFIG_FILE)) {
         fs::File configFile = LittleFS.open(CONFIG_FILE, "r");

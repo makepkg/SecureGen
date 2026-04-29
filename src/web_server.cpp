@@ -333,9 +333,11 @@ void WebServerManager::start() {
                     LOG_INFO("WebServer", "🔐 Register with encrypted body for user: [HIDDEN]");
                 } else {
                     LOG_ERROR("WebServer", "🔐 Register: decrypted body missing fields");
+                    delete registerData; request->_tempObject = nullptr;
                     request->send(400, "text/plain", "Invalid encrypted body");
                     return;
                 }
+                delete registerData; request->_tempObject = nullptr;
             } else {
                 LOG_ERROR("WebServer", "🔐 Register: encrypted body not processed");
                 request->send(400, "text/plain", "Encrypted body processing failed");
@@ -452,9 +454,11 @@ void WebServerManager::start() {
                     LOG_INFO("WebServer", "🔐 Login with encrypted body for user: [HIDDEN]");
                 } else {
                     LOG_ERROR("WebServer", "🔐 Login: decrypted body missing fields");
+                    delete loginData; request->_tempObject = nullptr;
                     request->send(400, "text/plain", "Invalid encrypted body");
                     return;
                 }
+                delete loginData; request->_tempObject = nullptr;
             } else {
                 LOG_ERROR("WebServer", "🔐 Login: encrypted body not processed");
                 request->send(400, "text/plain", "Encrypted body processing failed");
@@ -612,9 +616,11 @@ void WebServerManager::start() {
                         LOG_INFO("WebServer", "🔐 Login (obfuscated) with encrypted body for user: [HIDDEN]");
                     } else {
                         LOG_ERROR("WebServer", "🔐 Login (obfuscated): decrypted body missing fields");
+                        delete loginData; request->_tempObject = nullptr;
                         request->send(400, "text/plain", "Invalid encrypted body");
                         return;
                     }
+                    delete loginData; request->_tempObject = nullptr;
                 } else {
                     LOG_ERROR("WebServer", "🔐 Login (obfuscated): encrypted body not processed");
                     request->send(400, "text/plain", "Encrypted body processing failed");
@@ -1117,6 +1123,10 @@ void WebServerManager::start() {
             }
             
             // Ограничиваем размер JSON для TOTP ключей (max ~50 ключей)
+            if (ESP.getFreeHeap() < 20000) {
+                request->send(503, "application/json", "{\"error\":\"low memory\"}");
+                return;
+            }
             JsonDocument doc;
             JsonArray keysArray = doc.to<JsonArray>();
             
@@ -2272,7 +2282,7 @@ void WebServerManager::start() {
                         name.replace("+", " ");
                         password.replace("+", " ");
                         
-                        LOG_DEBUG("WebServer", "🔐 Parsed: index=" + String(indexVal) + ", name=" + name + ", password=" + password.substring(0, 8) + "...");
+                        LOG_DEBUG("WebServer", "🔐 Parsed: index=" + String(indexVal) + ", name=" + name + ", password length=" + String(password.length()));
                     } else {
                         return request->send(400, "text/plain", "Invalid decrypted password data format");
                     }
@@ -2743,7 +2753,7 @@ void WebServerManager::start() {
                 // Смена пароля
                 String response;
                 if (WebAdminManager::getInstance().changePassword(newPassword)) {
-                    response = "Password changed successfully!";
+                    response = "{\"success\":true,\"message\":\"Password changed successfully!\"}";
                 } else {
                     return request->send(500, "text/plain", "Failed to save new password.");
                 }
@@ -2754,12 +2764,12 @@ void WebServerManager::start() {
                 if (clientId2.length() > 0 && 
                     secureLayer.isSecureSessionValid(clientId2)) {
                     WebServerSecureIntegration::sendSecureResponse(
-                        request, 200, "text/plain", response, secureLayer);
+                        request, 200, "application/json", response, secureLayer);
                     return;
                 }
 #endif
                 // Fallback: незашифрованный ответ
-                request->send(200, "text/plain", response);
+                request->send(200, "application/json", response);
             }
         });
 
@@ -3866,12 +3876,22 @@ void WebServerManager::start() {
         doc["scl_pin"]        = cfg.scl_pin;
         doc["available"]      = rtcManager.isAvailable();
         doc["wifi_connected"] = (WiFi.status() == WL_CONNECTED);
+        doc["default_sda"]    = DEFAULT_I2C_SDA;
+        doc["default_scl"]    = DEFAULT_I2C_SCL;
+        #ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+        doc["board"] = "T-Display S3";
+        #else
+        doc["board"] = "T-Display ESP32";
+        #endif
         if (rtcManager.isAvailable()) {
             DateTime now = rtcManager.getCurrentTime();
             char iso[25];
-            snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02d:%02d:%02dZ",
-                     now.year(), now.month(), now.day(),
-                     now.hour(), now.minute(), now.second());
+            time_t utc_ts = now.unixtime();
+            struct tm localTm;
+            localtime_r(&utc_ts, &localTm);
+            snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02d:%02d:%02d",
+                     localTm.tm_year + 1900, localTm.tm_mon + 1, localTm.tm_mday,
+                     localTm.tm_hour, localTm.tm_min, localTm.tm_sec);
             doc["rtc_time"] = iso;
         } else {
             doc["rtc_time"] = nullptr;
@@ -3930,25 +3950,35 @@ void WebServerManager::start() {
     });
 
     server.on("/scan", HTTP_GET, [](AsyncWebServerRequest *request){
+        static unsigned long lastScanStart = 0;
         int n = WiFi.scanComplete();
         if (n == WIFI_SCAN_RUNNING) {
             request->send(202, "application/json", "[]");
             return;
         }
         if (n == WIFI_SCAN_FAILED || n == 0) {
-            WiFi.scanNetworks(true);
+            unsigned long now = millis();
+            if (now - lastScanStart > 5000) {
+                lastScanStart = now;
+                WiFi.scanNetworks(true);
+            }
             request->send(200, "application/json", "[]");
             return;
         }
-        JsonDocument doc;
+        StaticJsonDocument<2048> doc;
         JsonArray array = doc.to<JsonArray>();
-        for (int i = 0; i < n; ++i) {
+        int limit = min(n, 15);
+        for (int i = 0; i < limit; ++i) {
             JsonObject net = array.add<JsonObject>();
             net["ssid"] = WiFi.SSID(i);
             net["rssi"] = WiFi.RSSI(i);
         }
         WiFi.scanDelete();
-        WiFi.scanNetworks(true);
+        unsigned long now = millis();
+        if (now - lastScanStart > 5000) {
+            lastScanStart = now;
+            WiFi.scanNetworks(true);
+        }
         String output;
         serializeJson(doc, output);
         request->send(200, "application/json", output);
@@ -3970,6 +4000,46 @@ void WebServerManager::start() {
     });
 
     // Boot Mode endpoint
+#ifdef BOARD_HAS_USB_HID
+    server.on("/api/hid-mode", HTTP_GET, [this](AsyncWebServerRequest *request){
+        if (!isAuthenticated(request)) return request->send(401);
+        if (!verifyCsrfToken(request)) return request->send(403);
+        String mode = configManager.getDefaultHidMode();
+        JsonDocument doc;
+        doc["hid_mode"] = mode;
+        String out;
+        serializeJson(doc, out);
+        request->send(200, "application/json", out);
+    });
+
+    server.on("/api/hid-mode", HTTP_POST,[this](AsyncWebServerRequest *request){
+        if (!isAuthenticated(request)) return request->send(401);
+        if (!verifyCsrfToken(request)) return request->send(403);
+        auto* parsed = (JsonDocument*)request->_tempObject;
+        if (!parsed) return request->send(400, "text/plain", "No body");
+        String mode = (*parsed)["hid_mode"] | "ble";
+        delete parsed; request->_tempObject = nullptr;
+        if (mode != "ble" && mode != "usb") {
+            return request->send(400, "application/json", "{\"error\":\"Invalid hid_mode\"}");
+        }
+        bool ok = configManager.saveDefaultHidMode(mode);
+        JsonDocument resp;
+        resp["success"] = ok;
+        resp["hid_mode"] = mode;
+        String out;
+        serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    },NULL,[this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+        if (index + len < total) return;
+        JsonDocument* doc = new JsonDocument();
+        if (deserializeJson(*doc, data, len) == DeserializationError::Ok) {
+            request->_tempObject = doc;
+        } else {
+            delete doc;
+        }
+    });
+#endif
+
     server.on("/api/boot-mode", HTTP_GET, [this](AsyncWebServerRequest *request){
         if (!isAuthenticated(request)) return request->send(401);
         if (!verifyCsrfToken(request)) return request->send(403);
@@ -5824,12 +5894,22 @@ void WebServerManager::start() {
                     doc["scl_pin"]        = cfg.scl_pin;
                     doc["available"]      = rtcManager.isAvailable();
                     doc["wifi_connected"] = (WiFi.status() == WL_CONNECTED);
+                    doc["default_sda"]    = DEFAULT_I2C_SDA;
+                    doc["default_scl"]    = DEFAULT_I2C_SCL;
+                    #ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+                    doc["board"] = "T-Display S3";
+                    #else
+                    doc["board"] = "T-Display ESP32";
+                    #endif
                     if (rtcManager.isAvailable()) {
                         DateTime now = rtcManager.getCurrentTime();
                         char iso[25];
-                        snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02d:%02d:%02dZ",
-                                 now.year(), now.month(), now.day(),
-                                 now.hour(), now.minute(), now.second());
+                        time_t utc_ts = now.unixtime();
+                        struct tm localTm;
+                        localtime_r(&utc_ts, &localTm);
+                        snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02d:%02d:%02d",
+                                 localTm.tm_year + 1900, localTm.tm_mon + 1, localTm.tm_mday,
+                                 localTm.tm_hour, localTm.tm_min, localTm.tm_sec);
                         doc["rtc_time"] = iso;
                     } else {
                         doc["rtc_time"] = nullptr;
@@ -5904,6 +5984,34 @@ void WebServerManager::start() {
                     WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", out, secureLayer);
                     return;
                 }
+                
+#ifdef BOARD_HAS_USB_HID
+                // 🎯 МАРШРУТИЗАЦИЯ: /api/hid-mode GET
+                if (targetEndpoint == "/api/hid-mode" && targetMethod == "GET") {
+                    String mode = configManager.getDefaultHidMode();
+                    JsonDocument resp;
+                    resp["hid_mode"] = mode;
+                    String out; serializeJson(resp, out);
+                    WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", out, secureLayer);
+                    return;
+                }
+                
+                // 🎯 МАРШРУТИЗАЦИЯ: /api/hid-mode POST
+                if (targetEndpoint == "/api/hid-mode" && targetMethod == "POST") {
+                    String mode = targetData["hid_mode"] | "ble";
+                    if (mode != "ble" && mode != "usb") {
+                        WebServerSecureIntegration::sendSecureResponse(request, 400, "application/json", "{\"error\":\"Invalid hid_mode\"}", secureLayer);
+                        return;
+                    }
+                    bool ok = configManager.saveDefaultHidMode(mode);
+                    JsonDocument resp;
+                    resp["success"] = ok;
+                    resp["hid_mode"] = mode;
+                    String out; serializeJson(resp, out);
+                    WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", out, secureLayer);
+                    return;
+                }
+#endif
                 
                 // 🎯 МАРШРУТИЗАЦИЯ: /api/clock_settings GET
                 if (targetEndpoint == "/api/clock_settings" && targetMethod == "GET") {
@@ -6615,8 +6723,8 @@ void WebServerManager::start() {
                     
                     String output;
                     if (WebAdminManager::getInstance().changePassword(newPassword)) {
-                        output = "Password changed successfully!";
-                        WebServerSecureIntegration::sendSecureResponse(request, 200, "text/plain", output, secureLayer);
+                        output = "{\"success\":true,\"message\":\"Password changed successfully!\"}";
+                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
                     } else {
                         return request->send(500, "text/plain", "Failed to save new password.");
                     }
@@ -7537,12 +7645,22 @@ void WebServerManager::start() {
                         doc["scl_pin"]        = cfg.scl_pin;
                         doc["available"]      = rtcManager.isAvailable();
                         doc["wifi_connected"] = (WiFi.status() == WL_CONNECTED);
+                        doc["default_sda"]    = DEFAULT_I2C_SDA;
+                        doc["default_scl"]    = DEFAULT_I2C_SCL;
+                        #ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+                        doc["board"] = "T-Display S3";
+                        #else
+                        doc["board"] = "T-Display ESP32";
+                        #endif
                         if (rtcManager.isAvailable()) {
                             DateTime now = rtcManager.getCurrentTime();
                             char iso[25];
-                            snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02d:%02d:%02dZ",
-                                     now.year(), now.month(), now.day(),
-                                     now.hour(), now.minute(), now.second());
+                            time_t utc_ts = now.unixtime();
+                            struct tm localTm;
+                            localtime_r(&utc_ts, &localTm);
+                            snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02d:%02d:%02d",
+                                     localTm.tm_year + 1900, localTm.tm_mon + 1, localTm.tm_mday,
+                                     localTm.tm_hour, localTm.tm_min, localTm.tm_sec);
                             doc["rtc_time"] = iso;
                         } else {
                             doc["rtc_time"] = nullptr;
@@ -7640,6 +7758,37 @@ void WebServerManager::start() {
                         if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
                         return;
                     }
+
+#ifdef BOARD_HAS_USB_HID
+                    // /api/hid-mode GET
+                    if (targetEndpoint == "/api/hid-mode" && targetMethod == "GET") {
+                        String mode = configManager.getDefaultHidMode();
+                        JsonDocument resp;
+                        resp["hid_mode"] = mode;
+                        String out; serializeJson(resp, out);
+                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", out, secureLayer);
+                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                        return;
+                    }
+                    
+                    // /api/hid-mode POST
+                    if (targetEndpoint == "/api/hid-mode" && targetMethod == "POST") {
+                        String mode = targetData["hid_mode"] | "ble";
+                        if (mode != "ble" && mode != "usb") {
+                            WebServerSecureIntegration::sendSecureResponse(request, 400, "application/json", "{\"error\":\"Invalid hid_mode\"}", secureLayer);
+                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                            return;
+                        }
+                        bool ok = configManager.saveDefaultHidMode(mode);
+                        JsonDocument resp;
+                        resp["success"] = ok;
+                        resp["hid_mode"] = mode;
+                        String out; serializeJson(resp, out);
+                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", out, secureLayer);
+                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                        return;
+                    }
+#endif
                     
                     // /api/clock_settings GET
                     if (targetEndpoint == "/api/clock_settings" && targetMethod == "GET") {
@@ -8104,8 +8253,8 @@ void WebServerManager::start() {
                         
                         String output;
                         if (WebAdminManager::getInstance().changePassword(newPassword)) {
-                            output = "Password changed successfully!";
-                            WebServerSecureIntegration::sendSecureResponse(request, 200, "text/plain", output, secureLayer);
+                            output = "{\"success\":true,\"message\":\"Password changed successfully!\"}";
+                            WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
                             if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
                         } else {
                             if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
@@ -8905,25 +9054,35 @@ void WebServerManager::startConfigServer() {
         request->send(200, "text/html", html);
     });
     server.on("/scan", HTTP_GET, [](AsyncWebServerRequest *request){
+        static unsigned long lastConfigScanStart = 0;
         int n = WiFi.scanComplete();
         if (n == WIFI_SCAN_RUNNING) {
             request->send(202, "application/json", "[]");
             return;
         }
         if (n == WIFI_SCAN_FAILED || n == 0) {
-            WiFi.scanNetworks(true);
+            unsigned long now = millis();
+            if (now - lastConfigScanStart > 5000) {
+                lastConfigScanStart = now;
+                WiFi.scanNetworks(true);
+            }
             request->send(200, "application/json", "[]");
             return;
         }
-        JsonDocument doc;
+        StaticJsonDocument<2048> doc;
         JsonArray array = doc.to<JsonArray>();
-        for (int i = 0; i < n; ++i) {
+        int limit = min(n, 15);
+        for (int i = 0; i < limit; ++i) {
             JsonObject net = array.add<JsonObject>();
             net["ssid"] = WiFi.SSID(i);
             net["rssi"] = WiFi.RSSI(i);
         }
         WiFi.scanDelete();
-        WiFi.scanNetworks(true);
+        unsigned long now = millis();
+        if (now - lastConfigScanStart > 5000) {
+            lastConfigScanStart = now;
+            WiFi.scanNetworks(true);
+        }
         String output;
         serializeJson(doc, output);
         request->send(200, "application/json", output);

@@ -2,7 +2,9 @@
 
 <div align="center">
 
-**Open-source hardware security device featuring TOTP Authenticator and Password Manager with BLE Keyboard**
+**Open-source hardware security device featuring TOTP Authenticator and Password Manager with BLE/USB HID**
+
+*Supports T-Display ESP32 and T-Display-S3*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PlatformIO](https://img.shields.io/badge/PlatformIO-Compatible-orange.svg)](https://platformio.org/)
@@ -23,7 +25,17 @@
 
 ## 📸 Device Gallery
 
-### Physical Device
+<div align="center">
+  <img src="assets/screenshots/photos/dual-board-on.jpg" alt="T-Display ESP32 & S3 in Action" width="80%"/>
+  <br/>
+  <b>T-Display ESP32 & S3 — Dual Board Showcase</b>
+  <br/>
+  <i>ESP32 (left) running TOTP authenticator · S3 (right) running password manager with larger 1.9" display</i>
+</div>
+
+<br/>
+
+### Device Features & Modes
 <table>
   <tr>
     <td align="center" width="33%">
@@ -49,14 +61,35 @@
       <br/>Secure offline password vault
     </td>
     <td align="center" width="33%">
-      <img src="assets/screenshots/photos/ble-security-pin.jpg" alt="BLE Security" width="100%"/>
-      <br/><b>BLE Security Mode</b>
-      <br/>Encrypted wireless transmission
+      <img src="assets/screenshots/photos/esp32-s3.jpg" alt="T-Display-S3" width="100%"/>
+      <br/><b>T-Display-S3 Close-up</b>
+      <br/>1.9" display, USB HID support
     </td>
     <td align="center" width="33%">
       <img src="assets/screenshots/photos/qr-code-export.jpg" alt="QR Export" width="100%"/>
       <br/><b>QR Code Export</b>
       <br/>Export keys directly from display
+    </td>
+  </tr>
+</table>
+
+### Hardware & Settings
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/photos/dual-board-off.jpg" alt="Hardware Comparison" width="100%"/>
+      <br/><b>Hardware Comparison</b>
+      <br/>ESP32 (1.14") vs S3 (1.9")
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/photos/battery-status.jpg" alt="Battery Status" width="100%"/>
+      <br/><b>Battery & Status</b>
+      <br/>Real-time monitoring
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/photos/ble-security-pin.jpg" alt="BLE Security" width="100%"/>
+      <br/><b>BLE Security Mode</b>
+      <br/>Encrypted wireless transmission
     </td>
   </tr>
   <tr>
@@ -66,23 +99,10 @@
       <br/>WiFi / AP / Offline at startup
     </td>
     <td align="center" width="33%">
-      <img src="assets/screenshots/photos/battery-status.jpg" alt="Battery Status" width="100%"/>
-      <br/><b>Battery & Status</b>
-      <br/>Real-time monitoring
-    </td>
-    <td align="center" width="33%">
-      <img src="assets/screenshots/photos/device-ambient.jpg" alt="Device Ambient" width="100%"/>
-      <br/><b>Hardware Overview</b>
-      <br/>Compact open-source design
-    </td>
-  </tr>
-  <tr>
-    <td align="center" width="33%">
       <img src="assets/screenshots/photos/factory-reset.jpg" alt="Factory Reset" width="100%"/>
       <br/><b>Factory Reset</b>
       <br/>Secure data wiping
     </td>
-    <td align="center" width="33%"></td>
     <td align="center" width="33%"></td>
   </tr>
 </table>
@@ -137,6 +157,10 @@
 
 [▶️ Watch on YouTube](https://www.youtube.com/watch?v=YTVQBwgok_E)
 
+<br/><br/>
+
+<img src="assets/screenshots/gifs/t-display-spining.gif" alt="T-Display Device" width="50%"/>
+
 </div>
 
 ---
@@ -153,7 +177,8 @@
 
 ### 🔑 Password Manager
 - Offline encrypted vault — works without any network connection
-- BLE HID keyboard: types passwords directly into any device, no clipboard
+- **BLE HID keyboard** (ESP32 & S3): types passwords directly into any device, no clipboard
+- **USB HID keyboard** (S3 only): native USB connection, no pairing needed
 - PIN protection for BLE transmission
 - Encrypted export/import for backup and migration
 
@@ -170,10 +195,16 @@
 - Battery indicator and WiFi status always visible
 
 ### ⚡ Hardware
-- LILYGO® TTGO T-Display ESP32 — dual-core 240MHz, 1.14" TFT display
+
+**Supported Boards:**
+- **T-Display ESP32** — dual-core 240MHz, 1.14" SPI display (135×240), BLE HID keyboard
+- **T-Display-S3** — dual-core 240MHz, 1.9" parallel display (170×320), 8MB PSRAM, **USB HID + BLE HID** keyboard support
+
+**Features:**
 - Battery monitoring with real-time voltage and percentage
 - Deep sleep and light sleep power saving
 - **DS3231 RTC module support** — accurate offline timekeeping without WiFi; enables TOTP in AP and Offline modes
+- **USB HID on S3** — type passwords via native USB connection (no BLE pairing needed), better performance with AES encryption
 
 ---
 
@@ -215,7 +246,7 @@ Wake from sleep: press Button 2.
 
 ### Requirements
 - [PlatformIO](https://platformio.org/platformio-ide) (VS Code extension)
-- LILYGO® TTGO T-Display ESP32
+- LILYGO® TTGO T-Display ESP32 **or** T-Display-S3
 - USB-C cable
 
 ### ⚡ No tools? Flash from browser
@@ -228,7 +259,14 @@ Wake from sleep: press Button 2.
 ```bash
 git clone https://github.com/makepkg/SecureGen.git
 cd SecureGen
-# Open in VS Code with PlatformIO, then Upload
+
+# Open in VS Code with PlatformIO extension
+
+# For T-Display ESP32:
+pio run -e lilygo-t-display -t upload
+
+# For T-Display-S3:
+pio run -e lilygo-t-display-s3 -t upload
 ```
 
 ### First Boot
@@ -254,17 +292,36 @@ cd SecureGen
 | [API Endpoints](docs/development/ENDPOINTS.md) | Developer API reference |
 | [System Design](docs/development/system_design.md) | Architecture and boot sequence |
 | [Logging System](docs/development/LOGGING_SYSTEM.md) | Debug and log configuration |
+| [Multi-Board Support](docs/development/multi-board.md) | Porting guide for ESP32/S3 boards |
 
 ---
 
 ## 🗺️ Roadmap
 
+### User Experience
 - Quick search by account name, favorites / pinned accounts, grouping by tags (work, personal, finance)
-- Adapt firmware for other ESP32  (T-Display-S3)
-- Informative setting flags in web cabinet
+- Manual sorting and favorites (star icon) for TOTP/passwords
+- Category icons (🌐 web, 📱 app, 🖥 local, 🔑 token) for visual navigation
+- Password age tracking and creation date display
+- Display settings in web interface (brightness, auto-dim, orientation)
+
+### Security Enhancements
+- Multi-layer duress PIN (decoy accounts → real vault)
+- Factory wipe PIN (emergency full erase trigger)
+- Memory obfuscation (uniform noise blocks, vault address derived from password)
+- Time-based access windows (vault unavailable during specified hours)
+- Audit log (login history, key access, password changes)
 - Flash encryption and secure boot (optional hardening)
+- ATECC608 secure element support
+
+### Hardware & Platform
+- Vibration motor support for tactile feedback
+
+### Cryptography
 - Migration ECDH P-256 → X25519
-- Support ATECC608 Secure module
+
+### Web Interface
+- Informative setting flags in web cabinet
 
 ---
 

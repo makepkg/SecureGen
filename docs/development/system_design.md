@@ -1,7 +1,18 @@
 # System Design
 
-**Last updated:** March 2026
+**Last updated:** April 2026
 **Audience:** Developers
+
+---
+
+## Supported Hardware
+
+| Board | Display | MCU | PSRAM | USB HID | BLE HID |
+|-------|---------|-----|-------|---------|---------|
+| **T-Display ESP32** | 1.14" SPI (135×240) | ESP32 dual-core 240MHz | No | No | Yes |
+| **T-Display-S3** | 1.9" Parallel (170×320) | ESP32-S3 dual-core 240MHz | 8MB | Yes | Yes |
+
+**Multi-board architecture:** All board-specific code is isolated in `include/boards/board_*.h`. Business logic uses hardware abstraction macros. See [Multi-Board Support](multi-board.md) for porting guide.
 
 ---
 
@@ -11,7 +22,8 @@
 Application Layer
 ├── TOTP/HOTP Generator
 ├── Password Manager
-└── BLE HID Keyboard
+├── BLE HID Keyboard
+└── USB HID Keyboard (S3 only)
 
 Service Layer
 ├── Web Server
@@ -25,7 +37,7 @@ Security Layer
 
 Platform
 ├── LittleFS
-├── ESP32 Hardware
+├── ESP32/S3 Hardware
 └── mbedTLS
 ```
 
@@ -38,6 +50,7 @@ Platform
 | `KeyManager` | TOTP/HOTP key storage and code generation |
 | `PasswordManager` | Password storage and retrieval |
 | `PinManager` | PIN entry UI, BLE PIN configuration |
+| `USBHIDManager` | USB HID keyboard (S3 only), password typing via USB |
 | `WifiManager` | WiFi client, AP mode, mDNS |
 | `WebServerManager` | HTTP server, API endpoints, authentication |
 | `ConfigManager` | Non-sensitive configuration persistence |
@@ -52,9 +65,15 @@ Platform
 ### Phase 1 — Hardware (0–100ms)
 
 1. Serial init, LogManager init
-2. GPIO init (BTN1 = GPIO35, BTN2 = GPIO0, INPUT_PULLUP)
+2. GPIO init — board-specific pins loaded from `include/boards/board_*.h`
+   - **ESP32:** BTN1=GPIO35, BTN2=GPIO0
+   - **S3:** BTN1=GPIO14, BTN2=GPIO0
 3. Factory reset detection — both buttons held at boot
-4. BatteryManager init
+4. BatteryManager init — board-specific ADC channels
+5. Display init — board-specific TFT configuration (SPI vs Parallel)
+6. USB HID init (S3 only) — if enabled in config
+
+**Board detection:** Compile-time via `ARDUINO_LILYGO_T_DISPLAY_S3` define set by PlatformIO environment.
 
 **Factory reset trigger:** Both buttons held for 5 seconds during boot. Deletes all user data files, NVS partition (BLE bonding keys), URL obfuscation mappings, PIN attempt counter. Device reboots into first-boot flow.
 
@@ -226,7 +245,13 @@ Enabling PIN requires factory reset because the existing device key must be repl
 
 ## Shutdown and Deep Sleep
 
-The device has no hard power-off. "Shutdown" means entering deep sleep via `esp_deep_sleep_start()`. Wake is via GPIO0 (▼ Bottom button) — configured via `esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0)` before every `esp_deep_sleep_start()` call. RST button also wakes the device.
+The device has no hard power-off. "Shutdown" means entering deep sleep via `esp_deep_sleep_start()`. 
+
+**Wake configuration (board-specific):**
+- **ESP32:** `esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0)` — single GPIO wake
+- **S3:** `esp_sleep_enable_ext1_wakeup((1ULL << GPIO_NUM_0), ESP_EXT1_WAKEUP_ANY_LOW)` — ext1 wake source
+
+Wake button is GPIO0 (▼ Bottom button) on both boards. RST button also wakes the device.
 
 ### Trigger locations
 
@@ -248,10 +273,13 @@ void secureShutdown() {
     keyManager.wipeSecrets();           // zero + clear TOTP secrets
     passwordManager.wipePasswords();    // zero + clear passwords
     secureLayerManager.wipeAllSessions(); // zero session keys, free ECDH context
+    #ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+    usbHIDManager.end();                // release USB HID (S3 only)
+    #endif
 }
 ```
 
-This wipes all sensitive data from RAM before the device enters deep sleep.
+This wipes all sensitive data from RAM before the device enters deep sleep. On S3, USB HID is also properly released.
 
 ---
 
@@ -288,7 +316,7 @@ Sessions are stored encrypted in `/session.json.enc`. They survive reboots. Dura
 | `/session.json.enc` | Device key | Web session data |
 | `/ble_pin.json.enc` | Device key | BLE PIN |
 | `/pin_config.json` | Device key | BLE PIN enabled flag, config version |
-| `/config.json` | None (AP password field encrypted) | Theme, timeouts, startup mode, boot mode |
+| `/config.json` | None (AP password field encrypted) | Theme, timeouts, startup mode, boot mode, USB HID enabled (S3) |
 | `/ble_config.json` | None | BLE device name |
 | `/mdns_config.json` | None | mDNS hostname |
 | `/.sys_ui_prefs` | None | PIN length (UI preference only) |
@@ -299,6 +327,23 @@ Sessions are stored encrypted in `/session.json.enc`. They survive reboots. Dura
 URL obfuscation mappings are fully pre-generated at startup via `registerCriticalEndpoint()` rather than on-demand. This avoids repeated flash writes during normal operation — all 38 mappings are written once per epoch (every 30 reboots).
 
 **Note:** `config.json` is plaintext but contains no secrets — the AP password field within it is individually encrypted. PIN length in `/.sys_ui_prefs` is not sensitive; it reduces brute-force search space marginally but PBKDF2 cost makes this irrelevant in practice.
+
+---
+
+## Password Security Badges
+
+Visual indicators displayed on device screen when viewing passwords:
+
+| Badge | Meaning | Color |
+|-------|---------|-------|
+| 🔒 (1 lock) | Weak password | Red |
+| 🔒🔒 (2 locks) | Medium password | Yellow |
+| 🔒🔒🔒 (3 locks) | Strong password | Yellow |
+| **DUP** | Duplicate password (used elsewhere) | Amber |
+| **PIN** | Password contains only digits | Red |
+| **NAME** | Password contains account name | Orange |
+
+Badges are rendered by `DisplayManager::drawPasswordPage()` and help users identify security issues.
 
 ---
 
@@ -322,3 +367,25 @@ URL obfuscation mappings are fully pre-generated at startup via `registerCritica
 - Wrong PIN → retry (up to 5 total across reboots)
 - WiFi credentials invalid → AP mode for reconfiguration
 - Corrupted data file → factory reset
+
+---
+
+## USB HID (S3 Only)
+
+USB HID keyboard functionality is exclusive to T-Display-S3 due to native USB-OTG support.
+
+**Configuration:**
+- Enabled/disabled via web cabinet Settings tab
+- Setting stored in `/config.json` as `usb_hid_enabled` (boolean)
+- Requires device reboot to apply changes
+
+**Operation:**
+- When enabled, device appears as USB HID keyboard to connected computer
+- Passwords typed via USB without BLE pairing
+- No PIN protection required (physical USB connection implies authorized access)
+- Works simultaneously with BLE HID if both enabled
+
+**Initialization:**
+- `USBHIDManager::begin()` called during Phase 1 (Hardware init) if enabled
+- Uses `USB.begin()` and `Keyboard.begin()` from ESP32-S3 USB library
+- Properly released in `secureShutdown()` before deep sleep

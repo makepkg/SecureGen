@@ -27,6 +27,9 @@ import Layout from '../layouts/Layout.astro';
         <option disabled selected>Loading boards...</option>
       </select>
       <p id="board-description" class="select-description"></p>
+      <p class="select-description" style="margin-top: 0.25rem; font-style: italic; opacity: 0.7;">
+        <span data-i18n="board.note">The flasher will automatically detect your chip when connected.</span>
+      </p>
 
       <div class="divider"></div>
 
@@ -89,34 +92,66 @@ import Layout from '../layouts/Layout.astro';
           </a>
         </p>
 
-        <h3 data-i18n="manual.s3">Step 3: Flash all 3 files</h3>
+        <h3 data-i18n="manual.s3">Step 3: Flash firmware</h3>
+        
+        <h4 data-i18n="manual.esp32">For T-Display ESP32:</h4>
         <p><strong data-i18n="manual.linux">Linux/Mac:</strong></p>
         <div class="code-block">
           <pre><code>esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
   write_flash \
-  0x1000 bootloader.bin \
+  0x1000 bootloader-esp32.bin \
   0x8000 partitions.bin \
-  0x10000 firmware.bin</code></pre>
-          <button class="btn-copy" data-copy="esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 write_flash 0x1000 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin">Copy</button>
+  0x10000 firmware-esp32.bin</code></pre>
+          <button class="btn-copy" data-copy="esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 write_flash 0x1000 bootloader-esp32.bin 0x8000 partitions.bin 0x10000 firmware-esp32.bin">Copy</button>
         </div>
 
         <p><strong data-i18n="manual.windows">Windows:</strong></p>
         <div class="code-block">
           <pre><code>esptool.py --chip esp32 --port COM3 --baud 921600 \
   write_flash \
-  0x1000 bootloader.bin \
+  0x1000 bootloader-esp32.bin \
   0x8000 partitions.bin \
-  0x10000 firmware.bin</code></pre>
-          <button class="btn-copy" data-copy="esptool.py --chip esp32 --port COM3 --baud 921600 write_flash 0x1000 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin">Copy</button>
+  0x10000 firmware-esp32.bin</code></pre>
+          <button class="btn-copy" data-copy="esptool.py --chip esp32 --port COM3 --baud 921600 write_flash 0x1000 bootloader-esp32.bin 0x8000 partitions.bin 0x10000 firmware-esp32.bin">Copy</button>
+        </div>
+
+        <h4 data-i18n="manual.s3board">For T-Display-S3:</h4>
+        <p><strong data-i18n="manual.linux">Linux/Mac:</strong></p>
+        <div class="code-block">
+          <pre><code>esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 \
+  write_flash \
+  0x0 bootloader-s3.bin \
+  0x8000 partitions.bin \
+  0x10000 firmware-s3.bin</code></pre>
+          <button class="btn-copy" data-copy="esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 write_flash 0x0 bootloader-s3.bin 0x8000 partitions.bin 0x10000 firmware-s3.bin">Copy</button>
+        </div>
+
+        <p><strong data-i18n="manual.windows">Windows:</strong></p>
+        <div class="code-block">
+          <pre><code>esptool.py --chip esp32s3 --port COM3 --baud 921600 \
+  write_flash \
+  0x0 bootloader-s3.bin \
+  0x8000 partitions.bin \
+  0x10000 firmware-s3.bin</code></pre>
+          <button class="btn-copy" data-copy="esptool.py --chip esp32s3 --port COM3 --baud 921600 write_flash 0x0 bootloader-s3.bin 0x8000 partitions.bin 0x10000 firmware-s3.bin">Copy</button>
         </div>
 
         <h3 data-i18n="manual.alt">Alternative: Single merged file (easier)</h3>
         <p data-i18n="manual.alt.desc">Or use the merged binary (one file, easier):</p>
+        
+        <p><strong data-i18n="manual.esp32">T-Display ESP32:</strong></p>
         <div class="code-block">
-          <pre><code>esptool.py --port /dev/ttyUSB0 write_flash 0x0 merged-firmware.bin</code></pre>
-          <button class="btn-copy" data-copy="esptool.py --port /dev/ttyUSB0 write_flash 0x0 merged-firmware.bin">Copy</button>
+          <pre><code>esptool.py --chip esp32 --port /dev/ttyUSB0 write_flash 0x0 merged-esp32.bin</code></pre>
+          <button class="btn-copy" data-copy="esptool.py --chip esp32 --port /dev/ttyUSB0 write_flash 0x0 merged-esp32.bin">Copy</button>
         </div>
-        <p class="note" data-i18n="manual.note">Windows: replace /dev/ttyUSB0 with COM3</p>
+
+        <p><strong data-i18n="manual.s3board">T-Display-S3:</strong></p>
+        <div class="code-block">
+          <pre><code>esptool.py --chip esp32s3 --port /dev/ttyACM0 write_flash 0x0 merged-s3.bin</code></pre>
+          <button class="btn-copy" data-copy="esptool.py --chip esp32s3 --port /dev/ttyACM0 write_flash 0x0 merged-s3.bin">Copy</button>
+        </div>
+        
+        <p class="note" data-i18n="manual.note">Windows: replace /dev/ttyUSB0 or /dev/ttyACM0 with COM3 (or your port)</p>
       </div>
     </details>
   </section>
@@ -519,6 +554,7 @@ title: 'Flash Firmware',
 description: 'Install SecureGen on your ESP32 directly from the browser. No drivers, no software, no command line.',
 'callout': '⚠ Requires Chrome 89+ or Edge 89+ on desktop. Not supported in Firefox, Safari, or mobile browsers.',
 'label.board': 'Device Model',
+'board.note': 'The flasher will automatically detect your chip when connected.',
 'label.version': 'Firmware Version',
 'flash.btn': '⚡ Flash SecureGen',
 'warning': 'This will erase all existing data on the device. Make sure to export backups first.',
@@ -530,18 +566,21 @@ description: 'Install SecureGen on your ESP32 directly from the browser. No driv
 'manual.s1': 'Step 1: Install esptool',
 'manual.s2': 'Step 2: Download Firmware',
 'manual.s2.desc': 'Download the latest firmware files from',
-'manual.s3': 'Step 3: Flash all 3 files',
+'manual.s3': 'Step 3: Flash firmware',
+'manual.esp32': 'For T-Display ESP32:',
+'manual.s3board': 'For T-Display-S3:',
 'manual.linux': 'Linux/Mac:',
 'manual.windows': 'Windows:',
 'manual.alt': 'Alternative: Single merged file (easier)',
 'manual.alt.desc': 'Or use the merged binary (one file, easier):',
-'manual.note': 'Windows: replace /dev/ttyUSB0 with COM3'
+'manual.note': 'Windows: replace /dev/ttyUSB0 or /dev/ttyACM0 with COM3 (or your port)'
 },
 zh: {
 title: '刷写固件',
 description: '直接从浏览器在ESP32上安装SecureGen。无需驱动、软件或命令行。',
 'callout': '⚠ 需要桌面端Chrome 89+或Edge 89+。Firefox、Safari或移动浏览器不支持。',
 'label.board': '设备型号',
+'board.note': '连接时，刷写工具将自动检测您的芯片。',
 'label.version': '固件版本',
 'flash.btn': '⚡ 刷写SecureGen',
 'warning': '这将擦除设备上的所有现有数据。请先确保导出备份。',
@@ -553,18 +592,21 @@ description: '直接从浏览器在ESP32上安装SecureGen。无需驱动、软�
 'manual.s1': '第1步：安装esptool',
 'manual.s2': '第2步：下载固件',
 'manual.s2.desc': '从以下位置下载最新固件文件',
-'manual.s3': '第3步：刷写3个文件',
+'manual.s3': '第3步：刷写固件',
+'manual.esp32': 'T-Display ESP32：',
+'manual.s3board': 'T-Display-S3：',
 'manual.linux': 'Linux/Mac：',
 'manual.windows': 'Windows：',
 'manual.alt': '替代方案：单个合并文件（更简单）',
 'manual.alt.desc': '或使用合并的二进制文件（一个文件，更简单）：',
-'manual.note': 'Windows：将/dev/ttyUSB0替换为COM3'
+'manual.note': 'Windows：将/dev/ttyUSB0或/dev/ttyACM0替换为COM3（或您的端口）'
 },
 ru: {
 title: 'Прошивка устройства',
 description: 'Установите SecureGen на ESP32 прямо из браузера. Без драйверов, программ и командной строки.',
 'callout': '⚠ Требуется Chrome 89+ или Edge 89+ на компьютере. Не поддерживается в Firefox, Safari и мобильных браузерах.',
 'label.board': 'Модель устройства',
+'board.note': 'При подключении программа автоматически определит ваш чип.',
 'label.version': 'Версия прошивки',
 'flash.btn': '⚡ Прошить SecureGen',
 'warning': 'Это сотрёт все существующие данные на устройстве. Сначала экспортируйте резервные копии.',
@@ -576,12 +618,14 @@ description: 'Установите SecureGen на ESP32 прямо из брау
 'manual.s1': 'Шаг 1: Установите esptool',
 'manual.s2': 'Шаг 2: Скачайте прошивку',
 'manual.s2.desc': 'Скачайте последние файлы прошивки с',
-'manual.s3': 'Шаг 3: Прошейте 3 файла',
+'manual.s3': 'Шаг 3: Прошейте устройство',
+'manual.esp32': 'Для T-Display ESP32:',
+'manual.s3board': 'Для T-Display-S3:',
 'manual.linux': 'Linux/Mac:',
 'manual.windows': 'Windows:',
 'manual.alt': 'Альтернатива: единый объединённый файл (проще)',
 'manual.alt.desc': 'Или используйте объединённый бинарный файл (один файл, проще):',
-'manual.note': 'Windows: замените /dev/ttyUSB0 на COM3'
+'manual.note': 'Windows: замените /dev/ttyUSB0 или /dev/ttyACM0 на COM3 (или ваш порт)'
 }
 };
 

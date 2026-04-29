@@ -1,5 +1,6 @@
 #include "rtc_manager.h"
 #include "log_manager.h"
+#include "board_config.h"
 
 static const char *TAG = "RTC";
 static const char *RTC_CONFIG_FILE = "/rtc_config.json";
@@ -18,8 +19,8 @@ bool RTCManager::loadConfig() {
   }
   f.close();
   _config.enabled = doc["enabled"] | false;
-  _config.sda_pin = doc["sda_pin"] | 21;
-  _config.scl_pin = doc["scl_pin"] | 22;
+  _config.sda_pin = doc["sda_pin"] | DEFAULT_I2C_SDA;
+  _config.scl_pin = doc["scl_pin"] | DEFAULT_I2C_SCL;
   return true;
 }
 

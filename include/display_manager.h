@@ -23,7 +23,7 @@ public:
     void updateHeader();
     
     void drawLayout(const String& serviceName, int batteryPercentage, bool isCharging, bool isWebServerOn); 
-    void drawPasswordLayout(const String& name, const String& password, int batteryPercentage, bool isCharging, bool isWebServerOn);
+    void drawPasswordLayout(const String& name, const String& password, int batteryPercentage, bool isCharging, bool isWebServerOn, uint8_t strength = 0, bool isDuplicate = false, bool isPin = false, bool isName = false);
     void updateBatteryStatus(int percentage, bool isCharging);
     void updateClockStatus();
     void updateTOTPCode(const String& code, int timeRemaining, int period = 30);
@@ -35,6 +35,16 @@ public:
 
     void drawNoItemsPage(const String& text);
     void drawBleInitLoader(int progress);
+#ifdef BOARD_HAS_USB_HID
+    bool drawHidPrompt(bool defaultIsBle);
+    void drawUsbHidPage(const String& passwordName, const String& status);
+    void resetUsbHidPage();
+    void setUsbHidMode(bool active);
+private:
+    String _usbHidLastStatus = "";
+    bool _usbHidMode = false;
+public:
+#endif
     void drawGenericLoader(int progress, const String& text); // Новый универсальный лоадер
     void drawHOTPLoader(int progress); // HOTP loader progress 0-100
     void hideLoader(); // Скрыть лоадер и сбросить состояние
@@ -75,6 +85,9 @@ private:
     void drawClockOnSprite();
     void drawTotpContainer();
     void drawTotpText(const String& textToDraw);
+    void drawLockIcons(int x, int y, uint8_t strength);
+    void drawTextBadge(int x, int y, const char* label, uint16_t bg);
+    void drawDupBadge(int x, int y);
 
     TFT_eSPI tft;
     AnimationManager animationManager;

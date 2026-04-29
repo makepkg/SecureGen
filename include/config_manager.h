@@ -30,6 +30,11 @@ public:
     String getBootMode();
     bool saveBootMode(const String& mode);
     
+#ifdef BOARD_HAS_USB_HID
+    String getDefaultHidMode();
+    bool saveDefaultHidMode(const String& mode);
+#endif
+    
     // Web server configuration
     uint16_t getWebServerTimeout();
     void setWebServerTimeout(uint16_t timeoutMinutes);

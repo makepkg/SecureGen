@@ -385,7 +385,7 @@
       <a href="#first-boot" class="nav-link">First Boot</a>
       <a href="#modes" class="nav-link">Operating Modes</a>
       <a href="#navigation" class="nav-link">Navigation</a>
-      <a href="#ble" class="nav-link">BLE Transfer</a>
+      <a href="#ble" class="nav-link">HID Transfer</a>
       <a href="#factory-reset" class="nav-link">Factory Reset</a>
     </div>
     <div class="nav-section">
@@ -460,7 +460,7 @@
             <li>Passwords</li>
             <li>HOTP codes</li>
             <li>Web cabinet</li>
-            <li>BLE transfer</li>
+            <li>HID transfer (BLE / USB on S3)</li>
             <li>TOTP (DS3231 required)</li>
           </ul>
         </div>
@@ -470,7 +470,7 @@
           <ul>
             <li>Passwords</li>
             <li>HOTP codes</li>
-            <li>BLE transfer</li>
+            <li>HID transfer (BLE / USB on S3)</li>
             <li>TOTP (DS3231 required)</li>
             <li class="no">Web cabinet</li>
           </ul>
@@ -483,7 +483,7 @@
             <li>HOTP codes</li>
             <li>TOTP codes</li>
             <li>Web cabinet (opt.)</li>
-            <li>BLE (no web server)</li>
+            <li>HID transfer (BLE / USB on S3, no web server)</li>
           </ul>
         </div>
       </div>
@@ -494,8 +494,8 @@
         <table>
           <thead><tr><th>State</th><th>Available</th></tr></thead>
           <tbody>
-            <tr><td>Web server OFF</td><td>TOTP, HOTP, passwords, BLE transfer</td></tr>
-            <tr><td>Web server ON</td><td>TOTP, HOTP, passwords, web cabinet — BLE transfer disabled</td></tr>
+            <tr><td>Web server OFF</td><td>TOTP, HOTP, passwords, HID transfer (BLE / USB on S3)</td></tr>
+            <tr><td>Web server ON</td><td>TOTP, HOTP, passwords, web cabinet — HID transfer disabled</td></tr>
           </tbody>
         </table>
       </div>
@@ -543,7 +543,7 @@
           <tbody>
             <tr><td><span class="key">▲ Top</span></td><td>Previous password</td></tr>
             <tr><td><span class="key">▼ Bottom</span></td><td>Next password</td></tr>
-            <tr><td>Hold both buttons</td><td>Start BLE transfer</td></tr>
+            <tr><td>Hold both buttons</td><td>Start HID transfer — types the selected password as keyboard input. On T-Display-S3: a prompt appears to choose BLE HID or USB HID before transmission.</td></tr>
             <tr><td>Hold <span class="key">▲ Top</span> 5 sec</td><td>Switch back to TOTP / HOTP</td></tr>
             <tr><td>Hold <span class="key">▼ Bottom</span></td><td>Shutdown — enters deep sleep. Press <span class="key">▼ Bottom</span> to wake (PIN required).</td></tr>
           </tbody>
@@ -555,10 +555,13 @@
     <div class="section" id="ble">
       <div class="section-header">
         <span class="section-num">05</span>
-        <h2>BLE Password Transfer</h2>
+        <h2>HID Password Transfer</h2>
       </div>
 
-      <p>BLE transfer works without any app — the device acts as a Bluetooth HID keyboard and types the password directly.</p>
+      <p>The device acts as a hardware keyboard and types the selected password directly — no app required on the receiving device.</p>
+
+      <p><strong>T-Display ESP32</strong> (classic): BLE HID only.<br>
+      <strong>T-Display-S3</strong>: BLE HID or USB HID. When both buttons are held, a prompt appears on screen to select the output mode. The device pre-selects the configured default — wait for the auto-selection timer, or press a button to switch before transmission begins. USB HID requires no pairing or drivers.</p>
 
       <div class="table-wrap">
         <table>
@@ -570,6 +573,11 @@
             <tr><td>WiFi — web server ON</td><td>✗ No</td></tr>
           </tbody>
         </table>
+      </div>
+
+      <div class="callout callout-info">
+        <strong>T-Display-S3 — USB HID</strong>
+        USB HID is available under the same conditions as BLE HID. The HID output prompt (BLE or USB) appears after holding both buttons. Default mode is configurable in <strong>Settings → HID Mode</strong>.
       </div>
 
       <h3>First Connection (Bonding)</h3>
@@ -744,6 +752,24 @@
         </table>
       </div>
 
+      <h3>Password Security Badges</h3>
+      <p>While browsing passwords on the device screen, a row of security indicators is shown below the masked password. Badges appear only when relevant — a clean screen means no issues detected.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Badge</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td>🔒🔒🔒 Locks</td><td>Password strength: 1 lock (red) = weak, 2 locks (yellow) = medium, 3 locks (yellow) = strong. Based on length and character diversity.</td></tr>
+            <tr><td>DUP</td><td>Another entry in the vault has an identical password. Detected without decrypting other entries.</td></tr>
+            <tr><td>PIN</td><td>Password consists entirely of digits — significantly reduced entropy regardless of length.</td></tr>
+            <tr><td>NAME</td><td>Password contains the entry name (or part of it) as a substring, case-insensitive.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout callout-info">
+        <strong>Migration</strong>
+        Entries created before this feature was added are migrated automatically on first boot — no action required.
+      </div>
+
       <h3>Export &amp; Import</h3>
       <p>Works identically to key export — activate, enter password, download <code>.enc</code> file. Compatible with <code>decrypt_export.html</code>.</p>
     </div>
@@ -844,6 +870,9 @@
 
       <h3>Startup Mode</h3>
       <p>Default screen on boot: TOTP/HOTP view or password manager.</p>
+
+      <h3>HID Mode</h3>
+      <p><strong>T-Display-S3 only.</strong> Default output mode when sending passwords via hardware keyboard emulation: <strong>BLE HID</strong> or <strong>USB HID</strong>. This is the pre-selected option shown in the HID prompt — the other mode remains selectable before transmission begins. Factory default: BLE HID.</p>
 
       <h3>Boot Mode</h3>
       <p>Default network mode on boot: WiFi Client, AP Mode, or Offline. The selected mode becomes the timeout default during the boot prompt — the other two modes remain selectable via buttons. Changes take effect on next reboot. Factory default: WiFi Client.</p>
