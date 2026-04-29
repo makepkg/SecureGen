@@ -23,6 +23,7 @@ public:
     void startMdnsService();
     void startDns();
     void processDnsRequests();
+    void stopConfigPortal();
     
     // 🔒 Сохранение зашифрованных WiFi credentials (public для Web API)
     bool saveCredentials(const String& ssid, const String& password);

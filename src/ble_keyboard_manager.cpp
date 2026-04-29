@@ -552,16 +552,21 @@ const char* BleKeyboardManager::getDeviceName() {
 }
 
 void BleKeyboardManager::setDeviceName(const String& deviceName) {
-    SECURITY_LOG("Changing BLE device name");
     localDeviceName = deviceName;
+    
     // Для смены имени нужен полный перезапуск BLE
     bool wasRunning = (pServer != nullptr);
     if (wasRunning) {
+        // BLE запущен - нужен перезапуск для применения нового имени
+        SECURITY_LOG("BLE device name changed, restarting BLE service");
         end();
         delay(100);
         begin();
+        SECURITY_LOG("BLE service restarted with new name: " + deviceName);
+    } else {
+        // BLE не запущен - просто устанавливаем имя для будущего использования
+        LOG_DEBUG("BleKeyboardManager", "BLE device name set to: " + deviceName + " (will be used when BLE starts)");
     }
-    SECURITY_LOG("BLE device name changed successfully");
 }
 
 void BleKeyboardManager::loadBlePinFromCrypto() {

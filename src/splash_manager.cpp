@@ -1,6 +1,10 @@
 #include "splash_manager.h"
 #include "LittleFS.h"
+#ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+#include "embedded_splashes_s3.h"
+#else
 #include "embedded_splashes.h"
+#endif
 #include "log_manager.h"
 #include <ArduinoJson.h>
 #include <FS.h>
@@ -14,6 +18,20 @@ void SplashScreenManager::displayEmbeddedSplash(const String& mode) {
     String splashName = "";
     
     // 🎨 Модульный выбор splash screen
+#ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+    if (mode == "bladerunner") {
+        splashData = splash_s3_1;
+        splashLen = splash_s3_1_len;
+        splashName = "S3-Splash1";
+    } else if (mode == "combs") {
+        splashData = splash_s3_2;
+        splashLen = splash_s3_2_len;
+        splashName = "S3-Splash2";
+    } else if (mode == "securegen") {
+        splashData = splash_s3_3;
+        splashLen = splash_s3_3_len;
+        splashName = "S3-Splash3";
+#else
     if (mode == "bladerunner") {
         splashData = splash_bladerunner;
         splashLen = splash_bladerunner_len;
@@ -26,6 +44,7 @@ void SplashScreenManager::displayEmbeddedSplash(const String& mode) {
         splashData = splash_securegen;
         splashLen = splash_securegen_len;
         splashName = "SecureGen";
+#endif
     } else if (mode == "disabled") {
         LOG_INFO("SplashManager", "❌ Splash screen disabled by config");
         return; // Не показываем splash
@@ -122,7 +141,7 @@ String SplashScreenManager::loadSplashConfig() {
 
 bool SplashScreenManager::saveSplashConfig(const String& mode) {
     // Валидация
-    if (mode != "disabled" && mode != "bladerunner" && mode != "combs" && mode != "securegen") {
+    if (mode != "disabled" && mode != "bladerunner" && mode != "combs" && mode != "securegen" && mode != "s3_1" && mode != "s3_2" && mode != "s3_3") {
         LOG_ERROR("SplashManager", "❌ Invalid splash mode: " + mode);
         return false;
     }

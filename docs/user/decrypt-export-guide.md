@@ -50,6 +50,22 @@ Find `decrypt_export.html` in the root of the SecureGen project folder. Double-c
 |--------|-------------|
 | Name | Entry label |
 | Password | Hidden by default — click 👁️ to reveal |
+| Strength | Security indicators: locks (1-3), DUP, PIN, NAME badges. Updates live when editing |
+
+### Password security indicators
+
+When viewing passwords in the table, a **Strength** column displays security badges for each entry. These indicators mirror the same analysis shown on the device screen.
+
+| Indicator | Meaning |
+|-----------|---------|
+| 🔒🔒🔒 Locks | Password strength: 1 lock (red) = weak, 2 locks (yellow) = medium, 3 locks (yellow) = strong. Based on length and character diversity |
+| DUP | Another entry in the file has an identical password. Detected by comparing password hashes without decryption |
+| PIN | Password consists entirely of digits — significantly reduced entropy regardless of length |
+| NAME | Password contains the entry name (or part of it) as a substring, case-insensitive |
+
+**Indicators appear only when relevant** — a clean strength column with just locks means no issues detected.
+
+> **Live updates:** When you edit a password, the strength indicators refresh immediately. If you create a duplicate password, the DUP badge appears on both entries automatically.
 
 ---
 
@@ -68,6 +84,8 @@ Useful for adding keys manually before importing to a new device, without needin
 ## Editing entries
 
 **Modify a field** — click any cell to edit it directly. Dropdowns (Type, Algorithm, Digits) open a selector. Changes are held in memory until you save.
+
+**View security indicators** — the Strength column shows password quality badges: locks (1-3), DUP (duplicate), PIN (digits only), NAME (contains entry name). Indicators update live as you edit.
 
 **Add a row** — click **➕ Add Row**. A blank row appears at the bottom. Fill in all fields before saving.
 
@@ -129,6 +147,12 @@ If you changed your web cabinet admin password, re-encrypt your backup files wit
 2. Delete unwanted rows
 3. Save Encrypted
 4. Import back to device
+
+**Audit password security** — identify weak or reused passwords
+1. Decrypt the passwords backup
+2. Review the Strength column for red locks, DUP, or PIN badges
+3. Edit weak entries directly in the tool
+4. Save Encrypted → import back to device
 
 ---
 

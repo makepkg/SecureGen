@@ -199,6 +199,19 @@ POST response: `{ "success": true, "boot_mode": "wifi" }`
 
 The selected mode becomes the timeout default during the boot prompt (2-second window). The other two modes remain selectable via physical buttons. Takes effect on next reboot. Factory default: `"wifi"`.
 
+### GET|POST /api/hid-mode 🔐 🛡️ 🔒
+**S3 only.** Get or set the default HID output mode used when sending passwords via hardware keyboard emulation.
+
+GET response: `{ "hid_mode": "ble" }`  
+POST request: `{ "hid_mode": "usb" }` — accepted values: `"ble"`, `"usb"`.  
+POST response: `{ "success": true, "hid_mode": "usb" }`  
+Error: `{ "error": "Invalid hid_mode" }`
+
+The setting determines which mode is pre-selected when the device shows the HID output prompt (triggered by holding both buttons in PASSWORD mode). The user can either wait for the auto-selection based on this default, or press a button to switch to the other mode before transmission begins.
+
+> Note: CSRF token is required on both GET and POST — unlike most read-only GET endpoints.  
+> Stored in `config.json` as `default_hid_mode`. Factory default: `"ble"`.
+
 ---
 
 ## Security Settings

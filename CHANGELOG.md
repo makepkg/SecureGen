@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.2.0] — April 2026
+
+### Hardware Support
+- **T-Display-S3 support** — added full support for ESP32-S3 board with 1.9" parallel display (170×320), 8MB PSRAM, and native USB-OTG
+- **USB HID keyboard (S3 only)** — type passwords via native USB connection without BLE pairing; configurable in web cabinet Settings
+- **Password security badges** — visual indicators on password screen: strength (1-3 locks), duplicate detection (DUP), PIN-only passwords, name-in-password warnings
+- Better AES encryption performance on S3 hardware
+
+### Web Interface
+- **USB HID configuration** — enable/disable USB HID keyboard mode from web cabinet (S3 only)
+- **Board switcher on website** — documentation site now features interactive comparison between ESP32 and S3 boards
+
+### Bug Fixes & Stability
+- Fixed memory leaks in web server handlers
+- Fixed AsyncWebServer double-send crashes in body handlers
+- Fixed display initialization race conditions on S3
+
+### Documentation
+- Added [Multi-Board Support](docs/development/multi-board.md) — porting guide for ESP32/S3 boards
+- Updated README with hardware comparison and USB HID features
+- Expanded roadmap with security enhancements and UX improvements
+
+---
+
 ## [2.1.0] — March 2026
 
 ### Web Interface

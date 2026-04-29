@@ -54,7 +54,7 @@ Thank you for your interest in contributing! This document provides guidelines f
 ### Prerequisites
 
 - [PlatformIO IDE](https://platformio.org/platformio-ide)
-- LILYGO® TTGO T-Display ESP32 board
+- LILYGO® T-Display ESP32 **or** T-Display-S3 board
 - Git for version control
 
 ### Setup Steps
@@ -67,14 +67,22 @@ cd SecureGen
 # Add upstream remote
 git remote add upstream https://github.com/makepkg/SecureGen.git
 
-# Install dependencies (PlatformIO handles this)
+# Install dependencies (PlatformIO handles this automatically)
 pio lib install
 
-# Build the project
-pio run
+# Build the project for your board
+# For T-Display ESP32:
+pio run -e lilygo-t-display
+
+# For T-Display-S3:
+pio run -e lilygo-t-display-s3
 
 # Upload to device
-pio run --target upload
+# For T-Display ESP32:
+pio run -e lilygo-t-display -t upload
+
+# For T-Display-S3:
+pio run -e lilygo-t-display-s3 -t upload
 ```
 
 ## Coding Standards

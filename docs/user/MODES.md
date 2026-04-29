@@ -12,7 +12,20 @@ Shows time-based (TOTP) and counter-based (HOTP) codes for stored keys. Navigate
 
 ### Password Manager
 
-Shows stored passwords. Navigate and select entries with the buttons. Passwords can be transmitted via BLE HID keyboard emulation (hold both buttons 2 seconds) — no app required on the receiving device.
+Shows stored passwords. Navigate and select entries with the buttons. Passwords can be transmitted as hardware keyboard input — no app required on the receiving device. Hold both buttons for 2 seconds to start transmission.
+
+On **T-Display ESP32** (classic): BLE HID only.  
+On **T-Display-S3**: BLE HID or USB HID — a prompt appears on screen to select the output mode before transmission begins.
+
+#### HID Output Prompt (T-Display-S3 only)
+
+On T-Display-S3, holding both buttons shows a prompt to choose between BLE HID and USB HID before transmission:
+
+- The device pre-selects the **default mode** (configurable in web cabinet → Settings → HID Mode)
+- Wait for the **auto-selection timer** to confirm the default, or press a button to switch to the other mode
+- Transmission begins immediately after selection
+
+USB HID requires no pairing or drivers — the device is recognized as a standard keyboard on any OS.
 
 ---
 
@@ -50,6 +63,7 @@ Connects to an existing WiFi network. Full functionality.
 | HOTP codes | ✅ | ✅ | ✅ |
 | TOTP codes | ⚠️ DS3231 | ⚠️ DS3231 | ✅ |
 | BLE password transfer | ✅ | ✅ | ✅ (web server off) |
+| USB HID transfer (S3 only) | ✅ | ✅ | ✅ (web server off) |
 | DS3231 RTC time sync | ✅ | ✅ (via web cabinet) | ✅ (auto via NTP) |
 | Web cabinet | ❌ | ✅ | ✅ (on demand) |
 | NTP time sync | ❌ | ❌ | ✅ |

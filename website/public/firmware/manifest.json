@@ -1,14 +1,18 @@
 {
   "name": "SecureGen",
-  "version": "v2.1.0",
+  "version": "v2.2.0",
   "new_install_prompt_erase": true,
   "builds": [
     {
       "chipFamily": "ESP32",
       "parts": [
-        { "path": "/SecureGen/firmware/bootloader.bin", "offset": 4096 },
-        { "path": "/SecureGen/firmware/partitions.bin", "offset": 32768 },
-        { "path": "/SecureGen/firmware/firmware.bin",   "offset": 65536 }
+        { "path": "/SecureGen/firmware/merged-firmware-esp32.bin", "offset": 0 }
+      ]
+    },
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        { "path": "/SecureGen/firmware/merged-firmware-s3.bin", "offset": 0 }
       ]
     }
   ]

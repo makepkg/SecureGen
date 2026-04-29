@@ -11,7 +11,7 @@ import Layout from '../layouts/Layout.astro';
         <button id="lang-zh" style="background:none;border:none;cursor:pointer;font-size:1.3rem;opacity:0.4;" title="中文">🇨🇳</button>
       </div>
     </div>
-    <p class="tagline">ESP32 · OPEN SOURCE · MIT LICENSE</p>
+    <p class="tagline">ESP32 & ESP32-S3 · OPEN SOURCE · MIT LICENSE</p>
     <h1 data-i18n="hero.h1">Your secrets stay on the device</h1>
     <p class="subtitle" data-i18n="hero.sub">
       TOTP authenticator and password manager for ESP32. No cloud. No subscriptions. 
@@ -23,7 +23,7 @@ import Layout from '../layouts/Layout.astro';
     </div>
     <div class="badge-row">
       <span class="badge">MIT License</span>
-      <span class="badge">ESP32</span>
+      <span class="badge">ESP32 & S3</span>
       <span class="badge">PlatformIO</span>
       <span class="badge">No Cloud</span>
       <span class="badge">AES-256</span>
@@ -41,7 +41,7 @@ import Layout from '../layouts/Layout.astro';
       <div class="feature-card">
         <div class="icon">🔑</div>
         <h3 data-i18n="feat2.title">Password Manager</h3>
-        <p data-i18n="feat2.desc">Encrypted offline vault. BLE HID keyboard types passwords directly — no clipboard, no app needed.</p>
+        <p data-i18n="feat2.desc">Encrypted offline vault. BLE HID keyboard types passwords directly. S3 adds USB HID support — no clipboard, no app needed.</p>
       </div>
       <div class="feature-card">
         <div class="icon">🌐</div>
@@ -62,6 +62,52 @@ import Layout from '../layouts/Layout.astro';
         <div class="icon">📡</div>
         <h3 data-i18n="feat6.title">Works Offline</h3>
         <p data-i18n="feat6.desc">Passwords and HOTP codes work in all modes. TOTP works offline with an optional DS3231 RTC module — no internet needed.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="boards">
+    <p class="section-label" data-i18n="boards.label">SUPPORTED BOARDS</p>
+    <div class="board-tabs">
+      <button class="board-tab active" data-board="esp32" data-i18n="boards.tab1">T-Display ESP32</button>
+      <button class="board-tab" data-board="s3" data-i18n="boards.tab2">T-Display-S3</button>
+    </div>
+    <div class="board-content">
+      <div class="board-card active" data-board-content="esp32">
+        <div class="board-image">
+          <img src="/SecureGen/assets/screenshots/icon-t-disp.png" alt="T-Display ESP32" />
+        </div>
+        <div class="board-specs">
+          <h3 data-i18n="boards.esp32.title">T-Display ESP32 (Classic)</h3>
+          <ul class="specs-list">
+            <li><span class="spec-label" data-i18n="boards.esp32.s1">Display:</span> <span class="spec-value" data-i18n="boards.esp32.v1">1.14" SPI (135×240)</span></li>
+            <li><span class="spec-label" data-i18n="boards.esp32.s2">MCU:</span> <span class="spec-value" data-i18n="boards.esp32.v2">ESP32 (Dual-core 240MHz)</span></li>
+            <li><span class="spec-label" data-i18n="boards.esp32.s3">PSRAM:</span> <span class="spec-value spec-no" data-i18n="boards.esp32.v3">❌ No</span></li>
+            <li><span class="spec-label" data-i18n="boards.esp32.s4">BLE HID:</span> <span class="spec-value spec-yes" data-i18n="boards.esp32.v4">✅ Native support</span></li>
+            <li><span class="spec-label" data-i18n="boards.esp32.s5">USB HID:</span> <span class="spec-value spec-no" data-i18n="boards.esp32.v5">❌ Not supported</span></li>
+            <li><span class="spec-label" data-i18n="boards.esp32.s6">RTC Module:</span> <span class="spec-value spec-yes" data-i18n="boards.esp32.v6">✅ DS3231 supported</span></li>
+            <li><span class="spec-label" data-i18n="boards.esp32.s7">Security:</span> <span class="spec-value" data-i18n="boards.esp32.v7">AES-256 encryption</span></li>
+          </ul>
+          <p class="board-note" data-i18n="boards.esp32.note">Compact, affordable, perfect for basic TOTP and password management.</p>
+        </div>
+      </div>
+      <div class="board-card" data-board-content="s3">
+        <div class="board-image">
+          <img src="/SecureGen/assets/screenshots/icon-s3-disp.png" alt="T-Display-S3" />
+        </div>
+        <div class="board-specs">
+          <h3 data-i18n="boards.s3.title">T-Display-S3</h3>
+          <ul class="specs-list">
+            <li><span class="spec-label" data-i18n="boards.s3.s1">Display:</span> <span class="spec-value" data-i18n="boards.s3.v1">1.9" Parallel (170×320)</span></li>
+            <li><span class="spec-label" data-i18n="boards.s3.s2">MCU:</span> <span class="spec-value" data-i18n="boards.s3.v2">ESP32-S3 (Dual-core 240MHz)</span></li>
+            <li><span class="spec-label" data-i18n="boards.s3.s3">PSRAM:</span> <span class="spec-value spec-yes" data-i18n="boards.s3.v3">✅ 8MB</span></li>
+            <li><span class="spec-label" data-i18n="boards.s3.s4">BLE HID:</span> <span class="spec-value spec-yes" data-i18n="boards.s3.v4">✅ Native support</span></li>
+            <li><span class="spec-label" data-i18n="boards.s3.s5">USB HID:</span> <span class="spec-value spec-yes" data-i18n="boards.s3.v5">✅ Native support</span></li>
+            <li><span class="spec-label" data-i18n="boards.s3.s6">RTC Module:</span> <span class="spec-value spec-yes" data-i18n="boards.s3.v6">✅ DS3231 supported</span></li>
+            <li><span class="spec-label" data-i18n="boards.s3.s7">Security:</span> <span class="spec-value" data-i18n="boards.s3.v7">AES-256 (better performance)</span></li>
+          </ul>
+          <p class="board-note" data-i18n="boards.s3.note">Larger display, USB HID support, more memory — recommended for advanced features.</p>
+        </div>
       </div>
     </div>
   </section>
@@ -111,7 +157,7 @@ const INDEX_I18N = {
     'feat1.title': 'TOTP & HOTP',
     'feat1.desc': 'RFC 6238 and RFC 4226. Compatible with Google Authenticator, Authy, and all standard apps.',
     'feat2.title': 'Password Manager',
-    'feat2.desc': 'Encrypted offline vault. BLE HID keyboard types passwords directly — no clipboard, no app needed.',
+    'feat2.desc': 'Encrypted offline vault. BLE HID keyboard types passwords directly. S3 adds USB HID support — no clipboard, no app needed.',
     'feat3.title': 'Web Interface',
     'feat3.desc': 'Runs on the device. Full management from any browser, no cloud, no account. Available in 5 languages: EN, RU, DE, ZH, ES.',
     'feat4.title': 'AES-256 Encrypted',
@@ -120,6 +166,41 @@ const INDEX_I18N = {
     'feat5.desc': 'ECDH key exchange, AES-GCM session encryption, URL obfuscation, traffic masking.',
     'feat6.title': 'Works Offline',
     'feat6.desc': 'Passwords and HOTP codes work in all modes. TOTP works offline with an optional DS3231 RTC module — no internet needed.',
+    'boards.label': 'SUPPORTED BOARDS',
+    'boards.tab1': 'T-Display ESP32',
+    'boards.tab2': 'T-Display-S3',
+    'boards.esp32.title': 'T-Display ESP32 (Classic)',
+    'boards.esp32.s1': 'Display:',
+    'boards.esp32.s2': 'MCU:',
+    'boards.esp32.s3': 'PSRAM:',
+    'boards.esp32.s4': 'BLE HID:',
+    'boards.esp32.s5': 'USB HID:',
+    'boards.esp32.s6': 'RTC Module:',
+    'boards.esp32.s7': 'Security:',
+    'boards.esp32.v1': '1.14" SPI (135×240)',
+    'boards.esp32.v2': 'ESP32 (Dual-core 240MHz)',
+    'boards.esp32.v3': '❌ No',
+    'boards.esp32.v4': '✅ Native support',
+    'boards.esp32.v5': '❌ Not supported',
+    'boards.esp32.v6': '✅ DS3231 supported',
+    'boards.esp32.v7': 'AES-256 encryption',
+    'boards.esp32.note': 'Compact, affordable, perfect for basic TOTP and password management.',
+    'boards.s3.title': 'T-Display-S3',
+    'boards.s3.s1': 'Display:',
+    'boards.s3.s2': 'MCU:',
+    'boards.s3.s3': 'PSRAM:',
+    'boards.s3.s4': 'BLE HID:',
+    'boards.s3.s5': 'USB HID:',
+    'boards.s3.s6': 'RTC Module:',
+    'boards.s3.s7': 'Security:',
+    'boards.s3.v1': '1.9" Parallel (170×320)',
+    'boards.s3.v2': 'ESP32-S3 (Dual-core 240MHz)',
+    'boards.s3.v3': '✅ 8MB',
+    'boards.s3.v4': '✅ Native support',
+    'boards.s3.v5': '✅ Native support',
+    'boards.s3.v6': '✅ DS3231 supported',
+    'boards.s3.v7': 'AES-256 (better performance)',
+    'boards.s3.note': 'Larger display, USB HID support, more memory — recommended for advanced features.',
     'qs.label': 'QUICK START',
     'links.label': 'FIND US'
   },
@@ -131,7 +212,7 @@ const INDEX_I18N = {
     'feat1.title': 'TOTP & HOTP',
     'feat1.desc': 'RFC 6238和RFC 4226。兼容Google Authenticator、Authy及所有标准应用。',
     'feat2.title': '密码管理器',
-    'feat2.desc': '加密离线保险库。BLE HID键盘直接输入密码——无需剪贴板，无需应用。',
+    'feat2.desc': '加密离线保险库。BLE HID键盘直接输入密码。S3增加USB HID支持——无需剪贴板，无需应用。',
     'feat3.title': 'Web界面',
     'feat3.desc': '运行在设备上。从任何浏览器完全管理，无云端，无账户。界面支持5种语言：EN、RU、DE、ZH、ES。',
     'feat4.title': 'AES-256加密',
@@ -140,6 +221,41 @@ const INDEX_I18N = {
     'feat5.desc': 'ECDH密钥交换、AES-GCM会话加密、URL混淆、流量掩盖。',
     'feat6.title': '离线工作',
     'feat6.desc': '密码和HOTP代码在所有模式下均可工作。TOTP可配合可选的DS3231 RTC模块离线工作——无需互联网。',
+    'boards.label': '支持的开发板',
+    'boards.tab1': 'T-Display ESP32',
+    'boards.tab2': 'T-Display-S3',
+    'boards.esp32.title': 'T-Display ESP32（经典版）',
+    'boards.esp32.s1': '显示屏：',
+    'boards.esp32.s2': 'MCU：',
+    'boards.esp32.s3': 'PSRAM：',
+    'boards.esp32.s4': 'BLE HID：',
+    'boards.esp32.s5': 'USB HID：',
+    'boards.esp32.s6': 'RTC模块：',
+    'boards.esp32.s7': '安全性：',
+    'boards.esp32.v1': '1.14" SPI (135×240)',
+    'boards.esp32.v2': 'ESP32 (双核 240MHz)',
+    'boards.esp32.v3': '❌ 无',
+    'boards.esp32.v4': '✅ 原生支持',
+    'boards.esp32.v5': '❌ 不支持',
+    'boards.esp32.v6': '✅ 支持 DS3231',
+    'boards.esp32.v7': 'AES-256 加密',
+    'boards.esp32.note': '紧凑、实惠，适合基本的TOTP和密码管理。',
+    'boards.s3.title': 'T-Display-S3',
+    'boards.s3.s1': '显示屏：',
+    'boards.s3.s2': 'MCU：',
+    'boards.s3.s3': 'PSRAM：',
+    'boards.s3.s4': 'BLE HID：',
+    'boards.s3.s5': 'USB HID：',
+    'boards.s3.s6': 'RTC模块：',
+    'boards.s3.s7': '安全性：',
+    'boards.s3.v1': '1.9" 并行 (170×320)',
+    'boards.s3.v2': 'ESP32-S3 (双核 240MHz)',
+    'boards.s3.v3': '✅ 8MB',
+    'boards.s3.v4': '✅ 原生支持',
+    'boards.s3.v5': '✅ 原生支持',
+    'boards.s3.v6': '✅ 支持 DS3231',
+    'boards.s3.v7': 'AES-256 (更好的性能)',
+    'boards.s3.note': '更大的显示屏、USB HID支持、更多内存——推荐用于高级功能。',
     'qs.label': '快速开始',
     'links.label': '找到我们'
   },
@@ -151,7 +267,7 @@ const INDEX_I18N = {
     'feat1.title': 'TOTP & HOTP',
     'feat1.desc': 'RFC 6238 и RFC 4226. Совместим с Google Authenticator, Authy и всеми стандартными приложениями.',
     'feat2.title': 'Менеджер паролей',
-    'feat2.desc': 'Зашифрованное офлайн-хранилище. BLE HID-клавиатура вводит пароли напрямую — без буфера обмена и приложений.',
+    'feat2.desc': 'Зашифрованное офлайн-хранилище. BLE HID-клавиатура вводит пароли напрямую. S3 добавляет поддержку USB HID — без буфера обмена и приложений.',
     'feat3.title': 'Веб-интерфейс',
     'feat3.desc': 'Работает на устройстве. Полное управление из любого браузера, без облака и аккаунтов. Интерфейс доступен на 5 языках: EN, RU, DE, ZH, ES.',
     'feat4.title': 'Шифрование AES-256',
@@ -160,6 +276,41 @@ const INDEX_I18N = {
     'feat5.desc': 'Обмен ключами ECDH, шифрование сессии AES-GCM, обфускация URL, маскировка трафика.',
     'feat6.title': 'Работает офлайн',
     'feat6.desc': 'Пароли и коды HOTP работают во всех режимах. TOTP работает офлайн с опциональным модулем DS3231 RTC — интернет не нужен.',
+    'boards.label': 'ПОДДЕРЖИВАЕМЫЕ ПЛАТЫ',
+    'boards.tab1': 'T-Display ESP32',
+    'boards.tab2': 'T-Display-S3',
+    'boards.esp32.title': 'T-Display ESP32 (Классический)',
+    'boards.esp32.s1': 'Дисплей:',
+    'boards.esp32.s2': 'MCU:',
+    'boards.esp32.s3': 'PSRAM:',
+    'boards.esp32.s4': 'BLE HID:',
+    'boards.esp32.s5': 'USB HID:',
+    'boards.esp32.s6': 'RTC модуль:',
+    'boards.esp32.s7': 'Безопасность:',
+    'boards.esp32.v1': '1.14" SPI (135×240)',
+    'boards.esp32.v2': 'ESP32 (двухъядерный 240МГц)',
+    'boards.esp32.v3': '❌ Нет',
+    'boards.esp32.v4': '✅ Нативная поддержка',
+    'boards.esp32.v5': '❌ Не поддерживается',
+    'boards.esp32.v6': '✅ Поддержка DS3231',
+    'boards.esp32.v7': 'Шифрование AES-256',
+    'boards.esp32.note': 'Компактный, доступный, идеален для базового TOTP и управления паролями.',
+    'boards.s3.title': 'T-Display-S3',
+    'boards.s3.s1': 'Дисплей:',
+    'boards.s3.s2': 'MCU:',
+    'boards.s3.s3': 'PSRAM:',
+    'boards.s3.s4': 'BLE HID:',
+    'boards.s3.s5': 'USB HID:',
+    'boards.s3.s6': 'RTC модуль:',
+    'boards.s3.s7': 'Безопасность:',
+    'boards.s3.v1': '1.9" параллельный (170×320)',
+    'boards.s3.v2': 'ESP32-S3 (двухъядерный 240МГц)',
+    'boards.s3.v3': '✅ 8МБ',
+    'boards.s3.v4': '✅ Нативная поддержка',
+    'boards.s3.v5': '✅ Нативная поддержка',
+    'boards.s3.v6': '✅ Поддержка DS3231',
+    'boards.s3.v7': 'AES-256 (лучшая производительность)',
+    'boards.s3.note': 'Больший дисплей, поддержка USB HID, больше памяти — рекомендуется для расширенных функций.',
     'qs.label': 'БЫСТРЫЙ СТАРТ',
     'links.label': 'МЫ В СЕТИ'
   }
@@ -188,6 +339,48 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('lang-en').addEventListener('click', () => setIndexLang('en'));
   document.getElementById('lang-ru').addEventListener('click', () => setIndexLang('ru'));
   document.getElementById('lang-zh').addEventListener('click', () => setIndexLang('zh'));
+
+  // Board tabs switching
+  const boardTabs = document.querySelectorAll('.board-tab');
+  const boardCards = document.querySelectorAll('.board-card');
+
+  // Initialize the first active card with proper styles
+  const initialActiveCard = document.querySelector('.board-card.active');
+  if (initialActiveCard) {
+    initialActiveCard.style.opacity = '1';
+    initialActiveCard.style.transform = 'translateY(0)';
+  }
+
+  boardTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const targetBoard = tab.dataset.board;
+      
+      // Update active tab
+      boardTabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      
+      // Fade out current card
+      const currentCard = document.querySelector('.board-card.active');
+      if (currentCard) {
+        currentCard.style.opacity = '0';
+        currentCard.style.transform = 'translateY(10px)';
+        
+        setTimeout(() => {
+          currentCard.classList.remove('active');
+          
+          // Fade in new card
+          const newCard = document.querySelector(`[data-board-content="${targetBoard}"]`);
+          if (newCard) {
+            newCard.classList.add('active');
+            // Force reflow
+            newCard.offsetHeight;
+            newCard.style.opacity = '1';
+            newCard.style.transform = 'translateY(0)';
+          }
+        }, 300);
+      }
+    });
+  });
 });
 </script>
 
@@ -397,6 +590,135 @@ document.addEventListener('DOMContentLoaded', () => {
     border-color: var(--accent);
   }
 
+  /* Boards Section */
+  .boards {
+    margin-top: 5rem;
+  }
+
+  .board-tabs {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+    margin-bottom: 2rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .board-tab {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.85rem;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    padding: 0.75rem 1.5rem;
+    cursor: pointer;
+    position: relative;
+    transition: color 0.3s ease;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+
+  .board-tab:hover {
+    color: var(--text);
+  }
+
+  .board-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  .board-content {
+    position: relative;
+    min-height: 320px;
+  }
+
+  .board-card {
+    display: none;
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 2rem;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+
+  .board-card.active {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 2rem;
+    align-items: center;
+  }
+
+  .board-image {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+
+  .board-image img {
+    max-width: 100%;
+    height: auto;
+    filter: drop-shadow(0 4px 12px rgba(0, 229, 255, 0.15));
+  }
+
+  .board-specs h3 {
+    font-size: 1.3rem;
+    color: var(--text-bright);
+    margin-bottom: 1.25rem;
+  }
+
+  .specs-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 1.25rem 0;
+  }
+
+  .specs-list li {
+    display: flex;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 0.9rem;
+  }
+
+  .specs-list li:last-child {
+    border-bottom: none;
+  }
+
+  .spec-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    min-width: 140px;
+    flex-shrink: 0;
+    margin-right: 1rem;
+  }
+
+  .spec-value {
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  .spec-yes {
+    color: var(--success);
+  }
+
+  .spec-no {
+    color: var(--text-dim);
+    opacity: 0.6;
+  }
+
+  .board-note {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    font-style: italic;
+    line-height: 1.6;
+    padding: 0.75rem 1rem;
+    background: rgba(0, 229, 255, 0.04);
+    border-left: 2px solid var(--accent);
+    border-radius: 4px;
+  }
+
   @media (max-width: 768px) {
     .feature-grid {
       grid-template-columns: 1fr;
@@ -408,6 +730,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
     .hero {
       padding-top: 3rem;
+    }
+
+    .board-card.active {
+      grid-template-columns: 1fr;
+      gap: 1.5rem;
+    }
+
+    .board-image {
+      padding: 0.5rem;
+    }
+
+    .board-image img {
+      max-width: 180px;
+    }
+
+    .spec-label {
+      min-width: 120px;
+      font-size: 0.75rem;
+    }
+
+    .specs-list li {
+      font-size: 0.85rem;
     }
   }
 </style>

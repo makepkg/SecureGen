@@ -50,6 +50,9 @@ void DisplayManager::setTheme(Theme theme) {
 }
 
 void DisplayManager::update() {
+#ifdef BOARD_HAS_USB_HID
+    if (_usbHidMode) return;
+#endif
     // Check for QR code request (thread-safe)
     if (_qrCodeRequested) {
         _qrCodeRequested = false;
@@ -126,28 +129,48 @@ void DisplayManager::update() {
 
 // Ранняя инициализация для splash screen (минимальная подготовка)
 void DisplayManager::initForSplash() {
+#ifdef LCD_POWER_ON_PIN
+    pinMode(LCD_POWER_ON_PIN, OUTPUT);
+    digitalWrite(LCD_POWER_ON_PIN, HIGH);
+    delay(10);
+#endif
     tft.init();
     tft.setRotation(1);
     tft.fillScreen(TFT_BLACK); // Очищаем экран чёрным для splash
     tft.setTextDatum(MC_DATUM);
     
     // ⚠️ ВАЖНО: Настройка PWM ПОСЛЕ tft.init() т.к. init() сбрасывает пин на digitalWrite!
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    ledcAttach(TFT_BL, 5000, 8);
+    ledcWrite(TFT_BL, 0);
+#else
     ledcSetup(0, 5000, 8);
     ledcAttachPin(TFT_BL, 0);
-    ledcWrite(0, 0); // Начинаем с погашенного экрана для fade эффекта
+    ledcWrite(0, 0);
+#endif
 }
 
 // Полная инициализация (для обычного UI)
 void DisplayManager::init() {
+#ifdef LCD_POWER_ON_PIN
+    pinMode(LCD_POWER_ON_PIN, OUTPUT);
+    digitalWrite(LCD_POWER_ON_PIN, HIGH);
+    delay(10);
+#endif
     tft.init();
     tft.setRotation(1);
     tft.fillScreen(_currentThemeColors->background_dark); 
     tft.setTextDatum(MC_DATUM);
     
     // ⚠️ ВАЖНО: Настройка PWM ПОСЛЕ tft.init() т.к. init() сбрасывает пин!
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    ledcAttach(TFT_BL, 5000, 8);
+    ledcWrite(TFT_BL, 255);
+#else
     ledcSetup(0, 5000, 8);
     ledcAttachPin(TFT_BL, 0);
-    ledcWrite(0, 255); // Полная яркость по умолчанию
+    ledcWrite(0, 255);
+#endif
 
     headerSprite.createSprite(tft.width(), 35);
     headerSprite.setTextDatum(MC_DATUM);
@@ -277,6 +300,12 @@ void DisplayManager::updateHeader() {
     if (_loaderActive) {
         return;
     }
+    
+#ifdef BOARD_HAS_USB_HID
+    if (_usbHidMode) {
+        return;
+    }
+#endif
     
     // 🚫 Не отрисовываем заголовок на странице "No keys found" - шторка загораживает обводку!
     if (_isNoItemsPageActive) {
@@ -682,16 +711,30 @@ void DisplayManager::showMessage(const String& text, int x, int y, bool isError,
 }
 
 void DisplayManager::turnOff() {
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+  ledcWrite(TFT_BL, 0);
+#else
   ledcWrite(0, 0);
+#endif
   tft.writecommand(0x10); // TFT_SLPIN — stops internal oscillator (~5mA saved)
 }
 
 void DisplayManager::turnOn() {
   tft.writecommand(0x11); // TFT_SLPOUT — restart internal oscillator
   delay(120);             // ST7789 requires 120ms after SLPOUT before commands
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+  ledcWrite(TFT_BL, 255);
+#else
   ledcWrite(0, 255);
+#endif
 }
-void DisplayManager::setBrightness(uint8_t brightness) { ledcWrite(0, brightness); }
+void DisplayManager::setBrightness(uint8_t brightness) {
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+  ledcWrite(TFT_BL, brightness);
+#else
+  ledcWrite(0, brightness);
+#endif
+}
 
 // 🔄 Обновление текста без полной перерисовки экрана
 void DisplayManager::updateMessage(const String& text, int x, int y, int size) {
@@ -830,13 +873,20 @@ StartupMode DisplayManager::promptModeSelection(StartupMode defaultMode) {
     tft.fillScreen(_currentThemeColors->background_dark);
     tft.setTextColor(_currentThemeColors->text_primary);
     tft.setTextDatum(MC_DATUM);
+    
+#ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+    const int modeYOff = (tft.height() / 2 - 55) / 2;
+#else
+    const int modeYOff = 0;
+#endif
+    
     tft.setTextSize(2);
-    tft.drawString("Select Mode", tft.width() / 2, 20);
+    tft.drawString("Select Mode", tft.width() / 2, 20 + modeYOff);
     
     // Подзаголовок с подсказкой — динамически показывает дефолтный режим
     tft.setTextSize(1);
     tft.setTextColor(_currentThemeColors->text_secondary);
-    tft.drawString(defaultSubtitle(defaultMode), tft.width() / 2, 45);
+    tft.drawString(defaultSubtitle(defaultMode), tft.width() / 2, 45 + modeYOff);
 
     bool selection = true; // true = левая кнопка (leftMode), false = правая (rightMode)
     
@@ -914,7 +964,63 @@ StartupMode DisplayManager::promptModeSelection(StartupMode defaultMode) {
     return defaultMode; // По умолчанию — выбранный пользователем boot mode
 }
 
-void DisplayManager::drawPasswordLayout(const String& name, const String& password, int batteryPercentage, bool isCharging, bool isWebServerOn) {
+// Draw N lock icons at (x, y). Color encodes strength level.
+void DisplayManager::drawLockIcons(int x, int y, uint8_t strength) {
+    // Colors: 1=red(weak), 2=yellow(medium), 3=white(strong)
+    uint16_t colors[3];
+    if (strength == 3) {
+        colors[0] = colors[1] = colors[2] = _currentThemeColors->accent_secondary;
+    } else if (strength == 2) {
+        colors[0] = colors[1] = _currentThemeColors->accent_secondary;
+        colors[2] = _currentThemeColors->text_secondary;
+    } else {
+        colors[0] = _currentThemeColors->error_color;
+        colors[1] = _currentThemeColors->text_secondary;
+        colors[2] = _currentThemeColors->text_secondary;
+    }
+    
+    uint8_t count = (strength == 0) ? 0 : strength;
+    for (int i = 0; i < 3; i++) {
+        int lx = x + i * 10;
+        uint16_t col = (i < count) ? colors[i] : _currentThemeColors->text_secondary;
+        
+        // Lock body (6x5)
+        tft.fillRoundRect(lx, y + 4, 6, 5, 1, col);
+        
+        // Lock shackle outline (4x4), open at bottom
+        tft.drawRect(lx + 1, y, 4, 4, col);
+        
+        // Clear bottom of shackle where it meets body
+        tft.fillRect(lx + 1, y + 3, 4, 2, _currentThemeColors->background_dark);
+    }
+}
+
+// Generic text badge at (x, y). w=30, h=12.
+void DisplayManager::drawTextBadge(int x, int y, const char* label, uint16_t bg) {
+    uint16_t fg = 0x0000; // black text
+    tft.fillRoundRect(x, y, 30, 12, 2, bg);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextSize(1);
+    tft.setTextColor(fg, bg);
+    tft.drawString(label, x + 15, y + 6);
+}
+
+// Draw DUP badge at (x, y). Width ~30px, height 12px.
+void DisplayManager::drawDupBadge(int x, int y) {
+    uint16_t bg  = 0xC480; // muted amber — visible but not alarming
+    uint16_t fg  = 0x0000; // black text on amber
+    tft.fillRoundRect(x, y, 30, 12, 2, bg);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextSize(1);
+    tft.setTextColor(fg, bg);
+    tft.drawString("DUP", x + 15, y + 6);
+}
+
+void DisplayManager::drawPasswordLayout(const String& name, const String& password,
+                                        int batteryPercentage, bool isCharging,
+                                        bool isWebServerOn,
+                                        uint8_t strength, bool isDuplicate,
+                                        bool isPin, bool isName) {
     if (_isNoItemsPageActive) {
         _isNoItemsPageActive = false;
         tft.fillScreen(_currentThemeColors->background_dark); 
@@ -957,6 +1063,45 @@ void DisplayManager::drawPasswordLayout(const String& name, const String& passwo
     
     tft.drawString(maskedPassword, tft.width() / 2, tft.height() / 2);
 
+    // --- Lower quarter: centered badge row ---
+    {
+        const int lockW  = 30;
+        const int badgeW = 30;
+        const int gap    = 6;
+        int rowY = tft.height() * 3 / 4;
+        
+        // Count active elements to compute total width
+        int elems = 0;
+        if (strength > 0) elems++;
+        if (isDuplicate)  elems++;
+        if (isPin)        elems++;
+        if (isName)       elems++;
+        
+        int totalW = 0;
+        if (strength > 0) totalW += lockW;
+        int badgeCount = (isDuplicate?1:0) + (isPin?1:0) + (isName?1:0);
+        totalW += badgeCount * badgeW;
+        if (elems > 1) totalW += (elems - 1) * gap;
+        
+        int curX = (tft.width() - totalW) / 2;
+        
+        if (strength > 0) {
+            drawLockIcons(curX, rowY - 5, strength);
+            curX += lockW + gap;
+        }
+        if (isDuplicate) {
+            drawDupBadge(curX, rowY - 6);
+            curX += badgeW + gap;
+        }
+        if (isPin) {
+            drawTextBadge(curX, rowY - 6, "PIN", 0xF800); // red
+            curX += badgeW + gap;
+        }
+        if (isName) {
+            drawTextBadge(curX, rowY - 6, "NAME", 0xFD20); // orange
+        }
+    }
+
     lastDisplayedCode = ""; 
     lastTimeRemaining = -1;
     _lastDrawnTotpString = "";
@@ -965,8 +1110,101 @@ void DisplayManager::drawPasswordLayout(const String& name, const String& passwo
 }
 
 void DisplayManager::drawBleInitLoader(int progress) {
-    drawGenericLoader(progress, "Activating BLE...");
+    drawGenericLoader(progress, HID_LOADER_TEXT);
 }
+
+#ifdef BOARD_HAS_USB_HID
+void DisplayManager::drawUsbHidPage(const String& passwordName, const String& status) {
+    // Full redraw every time — same as drawBleConfirmPage, no caching
+    tft.fillScreen(_currentThemeColors->background_dark);
+    tft.setTextDatum(MC_DATUM);
+    
+    // Password name at top — same as BLE confirm
+    tft.setTextSize(1);
+    tft.setTextColor(_currentThemeColors->text_secondary);
+    String displayName = passwordName.length() > 20
+        ? passwordName.substring(0, 20) + "..." : passwordName;
+    tft.drawString(displayName, tft.width() / 2, 15);
+    
+    // Center label
+    tft.setTextSize(2);
+    tft.setTextColor(_currentThemeColors->text_primary);
+    tft.drawString("USB HID", tft.width() / 2, tft.height() / 2 - 5);
+    
+    // Status line — same position as "BLE Connected"
+    bool isReady = (status == "USB Connected");
+    tft.setTextSize(1);
+    tft.setTextColor(isReady ? _currentThemeColors->accent_primary
+                              : _currentThemeColors->text_secondary);
+    tft.drawString(status, tft.width() / 2, tft.height() / 2 + 20);
+    
+    // Button hints — same as BLE confirm
+    tft.setTextSize(1);
+    tft.setTextColor(_currentThemeColors->text_secondary);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString("Back", 5, tft.height() - 10);
+    tft.setTextDatum(TR_DATUM);
+    tft.drawString("Send", tft.width() - 5, tft.height() - 10);
+    tft.setTextDatum(MC_DATUM);
+    
+    _usbHidLastStatus = status;
+}
+
+void DisplayManager::resetUsbHidPage() {
+    _usbHidLastStatus = "";
+}
+
+void DisplayManager::setUsbHidMode(bool active) {
+    _usbHidMode = active;
+}
+
+bool DisplayManager::drawHidPrompt(bool defaultIsBle) {
+    // Ждём пока кнопки отпустят после удержания
+    unsigned long releaseWait = millis();
+    while ((digitalRead(BUTTON_1) == LOW || digitalRead(BUTTON_2) == LOW)
+           && millis() - releaseWait < 1000) {
+        delay(10);
+    }
+    delay(50); // доп. debounce
+    
+    tft.fillScreen(_currentThemeColors->background_dark);
+    tft.setTextDatum(MC_DATUM);
+    
+    // Заголовок — что будет по дефолту
+    tft.setTextColor(_currentThemeColors->text_primary);
+    tft.setTextSize(2);
+    tft.drawString(defaultIsBle ? "BLE Send" : "USB Send", tft.width() / 2, tft.height() / 2 - 30);
+    
+    // Подсказка — как переключить
+    tft.setTextSize(1);
+    tft.setTextColor(_currentThemeColors->text_secondary);
+    tft.drawString(defaultIsBle ? "Hold BTN2 for USB" : "Hold BTN2 for BLE",
+                   tft.width() / 2, tft.height() / 2 + 5);
+    
+    // Нижняя подпись
+    tft.setTextColor(_currentThemeColors->text_secondary);
+    tft.drawString("Auto in 3s...", tft.width() / 2, tft.height() / 2 + 25);
+    
+    unsigned long startTime = millis();
+    const unsigned long timeout = 3000;
+    
+    while (millis() - startTime < timeout) {
+        // BTN2 — переключить на BLE (если дефолт USB)
+        if (!defaultIsBle && digitalRead(BUTTON_2) == LOW) {
+            delay(50);
+            if (digitalRead(BUTTON_2) == LOW) { delay(200); return true; }
+        }
+        // BTN2 — переключить на USB (если дефолт BLE)
+        if (defaultIsBle && digitalRead(BUTTON_2) == LOW) {
+            delay(50);
+            if (digitalRead(BUTTON_2) == LOW) { delay(200); return false; }
+        }
+        delay(10);
+    }
+    
+    return defaultIsBle;
+}
+#endif
 
 void DisplayManager::drawHOTPLoader(int progress) {
     if (_qrCodeActive) return;
@@ -1090,16 +1328,23 @@ void DisplayManager::drawBleAdvertisingPage(const String& deviceName, const Stri
     tft.fillScreen(_currentThemeColors->background_dark);
     tft.setTextDatum(MC_DATUM);
     tft.setTextColor(_currentThemeColors->text_primary);
+    
+#ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+    const int yOff = (tft.height() - 120) / 2;
+#else
+    const int yOff = 0;
+#endif
+    
     tft.setTextSize(2);
-    tft.drawString("BLE Broadcasting", tft.width() / 2, 20);
+    tft.drawString("BLE Broadcasting", tft.width() / 2, 20 + yOff);
     
     tft.setTextSize(1);
-    tft.drawString("Device Name:", tft.width() / 2, 50);
+    tft.drawString("Device Name:", tft.width() / 2, 50 + yOff);
     tft.setTextSize(2);
-    tft.drawString(deviceName, tft.width() / 2, 70);
+    tft.drawString(deviceName, tft.width() / 2, 70 + yOff);
     
     tft.setTextSize(1);
-    tft.drawString(status, tft.width() / 2, 100);
+    tft.drawString(status, tft.width() / 2, 100 + yOff);
 
     // Button labels
     tft.setTextSize(1);
@@ -1327,7 +1572,11 @@ void DisplayManager::showQRCode(const String& text, int timeoutSeconds) {
     qrcode.create(text);
     
     // Timer at bottom of screen
+#ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+    _qrCodeTimerY = tft.height() - 20;
+#else
     _qrCodeTimerY = 120;
+#endif
     updateQRTimer(timeoutSeconds);
     
     LOG_INFO("DisplayManager", "QR code displayed");
@@ -1336,14 +1585,14 @@ void DisplayManager::showQRCode(const String& text, int timeoutSeconds) {
 void DisplayManager::updateQRTimer(int secondsRemaining) {
     // Clear only timer area
     int timerWidth = 40;
-    int timerX = (240 - timerWidth) / 2;
+    int timerX = (tft.width() - timerWidth) / 2;
     tft.fillRect(timerX - 5, _qrCodeTimerY - 10, timerWidth + 10, 15, _currentThemeColors->background_dark);
     
     // Draw updated timer (centered)
     tft.setTextColor(_currentThemeColors->text_secondary, _currentThemeColors->background_dark);
     tft.setTextSize(1);
     tft.setTextDatum(MC_DATUM);
-    tft.drawString(String(secondsRemaining) + "s", 120, _qrCodeTimerY);
+    tft.drawString(String(secondsRemaining) + "s", tft.width() / 2, _qrCodeTimerY);
 }
 
 void DisplayManager::hideQRCode() {

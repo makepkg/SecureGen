@@ -66,6 +66,7 @@ bool URLObfuscationManager::begin() {
     registerCriticalEndpoint("/api/rtc", "DS3231 RTC Module");
     registerCriticalEndpoint("/api/battery", "battery_status");
     registerCriticalEndpoint("/api/boot-mode", "Boot Mode Selection");
+    registerCriticalEndpoint("/api/hid-mode", "HID Mode Selection (BLE/USB)");
     registerCriticalEndpoint("/api/ble_pin_update", "BLE PIN Update");
     registerCriticalEndpoint("/api/clear_ble_clients", "Clear BLE Clients");
     registerCriticalEndpoint("/api/ble_settings", "BLE Device Settings");

@@ -7,7 +7,7 @@
 
 class BatteryManager {
 public:
-    BatteryManager(int adcPin, int powerPin);
+    BatteryManager(int adcPin, int adcChannel, int powerPin);
     void begin();
     
     // ⚡ OPTIMIZED: Возвращаем милливольты (integer) вместо float вольтов
@@ -17,6 +17,7 @@ public:
 
 private:
     int _adcPin;
+    int _adcChannel;
     int _powerPin;
     // ⚡ OPTIMIZED: Калибровка в милливольтах (integer math)
     const uint32_t _maxVoltageMv = 3800;  // 3.8V = 3800mV

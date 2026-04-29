@@ -7,6 +7,7 @@ enum class AppMode {
     BLE_ADVERTISING, 
     BLE_PIN_ENTRY, 
     BLE_CONFIRM_SEND, 
+    USB_HID_SEND,
     WIFI_CONFIG 
 };
 
