@@ -1,8 +1,8 @@
 import { defineConfig } from 'astro/config';
 
 export default defineConfig({
-  site: 'https://makepkg.github.io',
-  base: '/SecureGen',
+  site: 'https://RafaelReyesCarmona.github.io',
+  base: '/SecureGen-es_ES',
   output: 'static',
   build: {
     assets: 'assets',
