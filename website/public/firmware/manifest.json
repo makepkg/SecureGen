@@ -1,6 +1,6 @@
 {
   "name": "SecureGen",
-  "version": "v2.4.0",
+  "version": "v2.4.1",
   "new_install_prompt_erase": true,
   "builds": [
     {
