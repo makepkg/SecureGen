@@ -180,11 +180,9 @@ bool KeyManager::removeKey(int index) {
     return success;
 }
 
-std::vector<TOTPKey> KeyManager::getAllKeys() {
-    // Сортируем ключи по порядку перед возвратом
-    std::sort(keys.begin(), keys.end(), [](const TOTPKey& a, const TOTPKey& b) {
-        return a.order < b.order;
-    });
+const std::vector<TOTPKey>& KeyManager::getAllKeys() const {
+    // Сортировка должна происходить при загрузке, а не при каждом вызове
+    // TODO: Рассмотреть сортировку в loadKeys() для оптимизации
     return keys;
 }
 
@@ -208,6 +206,11 @@ bool KeyManager::reorderKeys(const std::vector<std::pair<String, int>>& newOrder
     }
     
     if (changed) {
+        // Сортируем ключи по порядку после изменения order
+        std::sort(keys.begin(), keys.end(), [](const TOTPKey& a, const TOTPKey& b) {
+            return a.order < b.order;
+        });
+        
         bool success = saveKeys();
         if (success) {
             LOG_INFO("KeyManager", "Successfully reordered TOTP keys");
@@ -258,6 +261,11 @@ bool KeyManager::replaceAllKeys(const String& jsonContent) {
         
         keys.push_back(key);
     }
+
+    // Сортируем ключи по порядку после импорта
+    std::sort(keys.begin(), keys.end(), [](const TOTPKey& a, const TOTPKey& b) {
+        return a.order < b.order;
+    });
 
     // Сохраняем новый набор ключей, который будет автоматически зашифрован
     bool success = saveKeys();
@@ -354,6 +362,11 @@ bool KeyManager::loadKeys() {
         
         keys.push_back(key);
     }
+    
+    // Сортируем ключи по порядку после загрузки
+    std::sort(keys.begin(), keys.end(), [](const TOTPKey& a, const TOTPKey& b) {
+        return a.order < b.order;
+    });
     
     LOG_INFO("KeyManager", "Loaded " + String(keys.size()) + " TOTP keys successfully");
     return true;

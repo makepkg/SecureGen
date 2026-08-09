@@ -1,4 +1,5 @@
 #include "usb_hid_manager.h"
+#include "secure_utils.h"
 
 #ifdef BOARD_HAS_USB_HID
 
@@ -24,12 +25,20 @@ bool UsbHidManager::isConnected() {
 
 void UsbHidManager::sendPassword(const char* password) {
   if (!_started) return;
-  _keyboard.print(String(password));
+  String temp(password);
+  _keyboard.print(temp);
+  secureWipeString(temp);
 }
 
 void UsbHidManager::sendEnter() {
   if (!_started) return;
   _keyboard.write(KEY_RETURN);
+  delay(50);
+}
+
+void UsbHidManager::sendTab() {
+  if (!_started) return;
+  _keyboard.write(0x2B); // HID keycode for Tab
   delay(50);
 }
 

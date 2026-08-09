@@ -126,6 +126,12 @@ Returns password list metadata. Passwords are not included — use `/api/passwor
 | strength | int | Password strength: 0=unknown, 1=weak, 2=medium, 3=strong |
 | pw_hash | string | First 8 bytes of SHA-256 (hex) for duplicate detection |
 | auto_send | bool | Whether Enter is sent after password output |
+| send_login | bool | Whether login is sent before password via HID |
+| login | string | Login value (used only when send_login=true) |
+| nav_mode | string | Navigation method after login: "enter" or "tab" (default "enter") |
+| login_delay_ms | int | Delay in ms after nav_mode key before typing password (default 300, only relevant when nav_mode="enter") |
+| wildcard | bool | Whether this is a wildcard (randomly-generated on-device) password. When true, the password field contains placeholder and the real value is never transmitted or stored |
+| wildcard_len | int | Length of generated wildcard password (4-64, default 16). Only relevant when wildcard=true |
 
 Passwords are never included in the list response — use `/api/passwords/get`.
 
@@ -138,8 +144,14 @@ Request: `{ "name": "...", "password": "...", "category": "web", "auto_send": fa
 | password | string | required | Password value |
 | category | string | "" | Category: "web", "app", "local", "key", or "" |
 | auto_send | bool | false | Automatically press Enter after HID output |
+| send_login | bool | false | Send login before password via HID |
+| login | string | "" | Login value (used only when send_login=true) |
+| nav_mode | string | "enter" | Navigation method after login: "enter" or "tab" |
+| login_delay_ms | int | 300 | Delay in ms after nav_mode key before typing password (only relevant when nav_mode="enter") |
+| wildcard | bool | false | Mark entry as wildcard (randomly generated on-device). Only one wildcard entry allowed. When true, name and password parameters are system-managed |
+| wildcard_len | int | 16 | Length of generated wildcard password (4-64). Only relevant when wildcard=true |
 
-Note: `category` and `auto_send` are optional.
+Note: `category`, `auto_send`, `send_login`, `login`, `nav_mode`, `login_delay_ms`, `wildcard`, and `wildcard_len` are optional.
 
 ### POST /api/passwords/get 🔐 🛡️ 🔒
 Returns the plaintext password for one entry.  
@@ -153,6 +165,12 @@ Response: `{ "success": true, "password": "...", "name": "...", "category": "web
 | name | string | Password entry name |
 | category | string | Category: "web", "app", "local", "key", or "" |
 | auto_send | bool | Whether Enter is sent after password output |
+| send_login | bool | Whether login is sent before password via HID |
+| login | string | Login value (used only when send_login=true) |
+| nav_mode | string | Navigation method after login: "enter" or "tab" |
+| login_delay_ms | int | Delay in ms after nav_mode key before typing password (only relevant when nav_mode="enter") |
+| wildcard | bool | Whether this is a wildcard entry (randomly generated on-device) |
+| wildcard_len | int | Length of generated wildcard password (4-64) |
 
 ### POST /api/passwords/update 🔐 🛡️ 🔒
 Request: `{ "index": 0, "name": "...", "password": "...", "category": "web", "auto_send": false }`
@@ -164,6 +182,16 @@ Request: `{ "index": 0, "name": "...", "password": "...", "category": "web", "au
 | password | string | required | Password value |
 | category | string | "" | Category: "web", "app", "local", "key", or "" |
 | auto_send | bool | false | Automatically press Enter after HID output |
+| send_login | bool | false | Send login before password via HID |
+| login | string | "" | Login value (used only when send_login=true) |
+| nav_mode | string | "enter" | Navigation method after login: "enter" or "tab" |
+| login_delay_ms | int | 300 | Delay in ms after nav_mode key before typing password (only relevant when nav_mode="enter") |
+| wildcard | bool | N/A | Cannot be changed after creation — wildcard status is immutable |
+| wildcard_len | int | 16 | Length of generated wildcard password (4-64). For wildcard entries, this is the ONLY editable field |
+
+**Note:** `send_login`, `login`, `nav_mode`, and `login_delay_ms` are optional per-entry fields. When `send_login` is enabled and `login` is non-empty, the device types the login value first, then presses Tab or Enter (per `nav_mode`), waits `login_delay_ms` (only relevant for `nav_mode="enter"`), then types the password. A `LOGIN` badge (with an Enter ⏎ or Tab ⇥ icon) is shown on the device screen and in the web cabinet for entries with `send_login` enabled.
+
+**Wildcard entry restrictions:** If the entry at `index` is a wildcard entry, only `wildcard_len` can be modified. All other parameters (`name`, `password`, `category`, `auto_send`, `send_login`, `login`, `nav_mode`, `login_delay_ms`) are ignored and existing values are preserved. This is enforced in `PasswordManager::updatePassword()`.
 
 ### POST /api/passwords/delete 🔐 🛡️ 🔒
 Request: `{ "index": 0 }`
@@ -181,25 +209,70 @@ Array of original indices in desired new order.
 
 ## Import / Export
 
-Import/export requires explicit activation first — it is disabled by default.
+Import and export of TOTP keys and passwords is handled entirely through
+**Secure Import/Export Mode** — an isolated, closed-AP session separate
+from the ordinary web cabinet. There are no import/export endpoints in
+the ordinary authenticated API surface; the feature is deliberately kept
+out of the 8-layer web cabinet stack (see
+[`SECURITY_OVERVIEW.md`](security/SECURITY_OVERVIEW.md) for the
+rationale).
 
-### POST /api/enable_import_export 🔐 🛡️ 🔒
-Enables import/export for 5 minutes.
+### Entering the mode
 
-### GET /api/import_export_status 🔐 🔒
-Response: `{ "enabled": true, "expires_in": 240 }`
+### POST /api/enter_import_export_mode 🔐 🛡️ 🔒
+Authenticated, ordinary-cabinet endpoint. Requires the admin web password
+(re-verified via `WebAdminManager::verifyCredentials()`, independent of
+the current session) in addition to normal auth/CSRF. On success, writes
+a flag file tagged with the currently-active Hidden Space (`A` or `B`)
+and reboots the device.
 
-### POST /api/export 🔐 🛡️ 🔒
-Exports encrypted TOTP keys. Uses `PBKDF2_ITERATIONS_EXPORT` for key derivation, AES-256-CBC.  
 Request: `{ "password": "..." }`  
-Response: `{ "success": true, "encrypted_data": "...", "salt": "..." }`
+Response (success): `{ "status": "rebooting" }`  
+Response (failure): `{ "error": "..." }`
 
-### POST /api/import 🔐 🛡️ 🔒
-Request: `{ "password": "...", "encrypted_data": "...", "salt": "..." }`
+The device reboots, requires a normal PIN unlock, and — only if the
+unlocked space matches the space that requested the mode — boots into
+a dedicated, closed WPA2 access point (`ESP32-IMPEXP-XXXX`) instead of
+the ordinary web cabinet.
 
-### POST /api/passwords/export 🔐 🛡️ 🔒
-Same encryption scheme as `/api/export` but for the password store.  
-Request: `{ "password": "..." }`
+### Restricted-mode routes (served only inside the closed AP session)
+
+These routes exist **only** while the device is inside Secure
+Import/Export Mode — they are not reachable from the ordinary network
+connection, and the ordinary cabinet's 100+ routes are not reachable
+from inside this AP. No CSRF, no session cookie, no ECDH/AES-256-GCM
+transport layer — security here comes from the closed AP (freshly
+generated WPA2 password, RAM-only, never persisted) plus the prior PIN
+unlock, not from Layer 4. See `SECURITY_OVERVIEW.md` for this trade-off.
+
+- `GET /` — serves the restricted-mode page (own HTML/CSS/JS, does not
+  reuse the ordinary cabinet's `page_index.h`)
+- `POST /api/restricted/export_keys` — exports TOTP keys, password-
+  encrypted (`PBKDF2_ITERATIONS_EXPORT`, AES-256-CBC, same format as
+  `decrypt_export.html` expects)
+- `POST /api/restricted/export_passwords` — exports passwords, same
+  encryption scheme
+- `POST /api/restricted/import_keys` — imports a previously exported
+  keys file; validates the decrypted payload contains a `secret` field
+  on every entry before writing, rejecting mismatched file types (e.g.
+  a passwords export submitted here) with an explicit error instead of
+  silently corrupting the key store
+- `POST /api/restricted/import_passwords` — imports a previously
+  exported passwords file; same schema validation, requiring a
+  `password` field on every entry
+- `POST /api/restricted/close_session` — ends the session and reboots
+  back to normal operation
+
+All operations resolve file paths via `CryptoManager::getSpacePath(...)`,
+so they automatically operate on whichever Hidden Space is active —
+never hardcoded to Space A.
+
+**Session bounds:** 10-minute rolling inactivity timeout, 30-minute hard
+cap regardless of activity. Either limit expiring, or a manual "Close
+Session," reboots the device back to the ordinary cabinet.
+
+**Minimum export/import password length:** 8 characters. This password
+is separate from both the device PIN and the web admin password.
 
 ---
 
@@ -314,6 +387,8 @@ Set or disable the Duress PIN.
 The Duress PIN must be the same length as the current Startup PIN (4–10 digits) and must consist of digits only. When entered at startup, the device shows "PIN OK" and then permanently erases all data (keys, passwords, device key, WiFi, BLE NVS, sessions, config) before restarting.
 The entire LittleFS partition (~3.9 MB) is also wiped at the hardware level (`esp_partition_erase_range`) — file recovery via flash reader is not possible.
 
+**Prerequisite:** Startup PIN must be enabled. The Duress PIN can only ever be triggered from the startup PIN lock screen, so it has no meaning without one — `POST /api/duress_pin_update` returns `400` if the startup PIN is disabled, and disabling the startup PIN automatically deletes any configured Duress PIN.
+
 Status fields returned by `GET /api/pincode_settings`:
 - `duressPinEnabled` — `true` / `false`
 - `duressPinConfigured` — whether `/duress_pin.hash` exists and is valid
@@ -395,13 +470,24 @@ On next boot, PIN entry flow creates Space B slot.
 ``` 
 
 **Action: disable** 
-Wipes Space B: overwrites slot B with random bytes, deletes all 
-HMAC-derived data files, removes sentinel and shared cache. 
-Must be called from Space B context. 
+Removes Space B: overwrites slot B with random bytes, deletes all 
+HMAC-derived data files, removes sentinel and shared cache. Called from 
+Space A context; requires Space B's own PIN, entered on-device, to 
+correctly locate and delete its files. The HTTP response does not confirm 
+deletion — it only signals that the device is now waiting for PIN entry. 
 
 ```json 
 { "action": "disable" } 
-``` 
+```
+
+Response (immediate, before device confirmation): 
+```json 
+{ "status": "prompt_on_device", "success": true, "message": "Please enter Space B PIN on device to confirm. Check device screen." } 
+```
+
+The device then prompts for Space B's PIN on-screen. On success it deletes 
+the data and reboots; on a wrong PIN, no data is touched and Hidden Space 
+remains active. 
 
 **Action: set_share_wifi** 
 Copies Space A WiFi credentials re-encrypted with chip-derived key to 

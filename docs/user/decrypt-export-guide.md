@@ -54,6 +54,37 @@ Find `decrypt_export.html` in the root of the SecureGen project folder. Double-c
 | Category | Entry classification (None, Web, App, Local, Key / Token) |
 | Password | Hidden by default — click 👁️ to reveal |
 | Strength | Security indicators: locks (1-3), DUP, PIN, NAME badges. Updates live when editing |
+| WC Len | **Wildcard password length** (4-64 characters). Only visible and editable for wildcard entries. For regular passwords, shows "—" |
+| Auto ⏎ | Auto-send Enter after typing the password via HID |
+| Login+PW | Enables sending a login before the password via HID |
+| Login | Login/username value, typed before the password. Only used when Login+PW is enabled |
+| Nav | Navigation key pressed after the login: Enter or Tab. Only editable when Login+PW is enabled |
+| Delay | Delay in milliseconds after the navigation key before typing the password (default 300). Only relevant when Nav is set to Enter |
+
+### Wildcard passwords
+
+**Wildcard passwords** are randomly generated on-device each time they're typed via HID. They never leave the device and cannot be exported or copied through the web interface.
+
+When you decrypt a backup containing a wildcard password:
+
+- **Name field** shows `random` and is locked (cannot be edited)
+- **Category** is empty and locked
+- **Password field** shows `[wildcard]` placeholder — locked, reveal button hidden
+- **WC Len field** shows the generated password length — **this is the only editable field**
+- **Auto ⏎, Login+PW, Login, Nav, Delay** — all locked (always disabled for wildcard entries)
+- **Copy button** replaced with text: 🎲 Generated on device
+- **🎲 Wildcard badge** appears next to the entry name
+
+> **Why wildcard?** For high-security accounts that don't allow password managers or where you want cryptographically random passwords without exposing them to any interface. The password is generated on-device during HID typing and immediately discarded.
+
+**What you can edit:**
+- ✅ **WC Len** — adjust the generated password length (4-64 characters)
+- ✅ **Delete** the entry entirely
+
+**What you cannot edit:**
+- ❌ Name (always `random`)
+- ❌ Password value (always `[wildcard]` placeholder)
+- ❌ Category, Auto ⏎, Login+PW, Login, Nav, Delay (wildcard entries don't support these features)
 
 ### Password security indicators
 
@@ -106,9 +137,11 @@ Useful for adding keys manually before importing to a new device, without needin
 |--------|-------------|-------------|
 | **🔒 Save Encrypted** | Re-encrypts the data with your password and downloads a `.json` file | To import back into the device, or keep as a backup |
 | **⬇️ Download JSON** | Downloads the data as plain unencrypted JSON | Migration to other apps, manual inspection |
-| **📋 Copy CSV** | Copies all data as CSV to clipboard | Pasting into Excel or Google Sheets |
+| **📋 Copy CSV** | Copies all data as CSV to clipboard (includes `Wildcard` and `Wildcard-Len` columns for passwords) | Pasting into Excel or Google Sheets |
 
 > **Warning:** The file from **⬇️ Download JSON** contains your secrets in plain text. Do not store it long-term. Delete it from your Downloads folder after use.
+
+> **Note:** CSV export for passwords includes two wildcard-related columns: `Wildcard` (1/0) and `Wildcard-Len` (4-64). For wildcard entries, the `Password` column will contain the placeholder `[wildcard]`.
 
 ---
 
@@ -156,6 +189,15 @@ If you changed your web cabinet admin password, re-encrypt your backup files wit
 2. Review the Strength column for red locks, DUP, or PIN badges
 3. Edit weak entries directly in the tool
 4. Save Encrypted → import back to device
+
+**Adjust wildcard password length** — change generated password size
+1. Decrypt the passwords backup
+2. Find entries with 🎲 Wildcard badge
+3. Edit the **WC Len** field (4-64 characters)
+4. Save Encrypted → import back to device
+5. Next time the device types this password via HID, it will use the new length
+
+> **Note:** You cannot convert a regular password to wildcard or vice versa in the tool. Wildcard entries must be created on the device itself.
 
 ---
 

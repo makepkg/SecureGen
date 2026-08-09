@@ -43,7 +43,7 @@ public:
     bool removeKey(int index);
     bool updateKey(int index, const String& name, const String& secret);
     bool reorderKeys(const std::vector<std::pair<String, int>>& newOrder);
-    std::vector<TOTPKey> getAllKeys();
+    const std::vector<TOTPKey>& getAllKeys() const;
     bool replaceAllKeys(const String& jsonContent);
     
     // Новые функции для расширенного функционала

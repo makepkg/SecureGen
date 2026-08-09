@@ -156,6 +156,14 @@ Default pins: SDA=21, SCL=22. Custom pins applied via `reinit()` on-the-fly with
 | AP | TOTP works immediately; user can re-sync via web cabinet | System clock zeroed → NOT SYNCED |
 | Offline | TOTP works; re-sync on next AP/WiFi boot | NOT SYNCED |
 
+**API time format:** `GET /api/rtc` always returns `rtc_time` as a UTC ISO-8601
+string with a trailing `Z` (e.g. `2026-08-07T14:32:15Z`), derived via
+`gmtime_r()` — never `localtime_r()`. This is intentional: any localtime
+conversion here previously caused false drift-detection on the client
+whenever the device timezone and browser timezone differed. New code that
+touches RTC time serialization must preserve this — convert to local time
+only at the point of on-screen/UI display, never before an epoch comparison.
+
 **Pseudo-sleep re-sync:** On every wake from pseudo-sleep, if DS3231 is available, `syncFromRTC()` is called to correct ESP32 internal RTC drift accumulated during sleep. Note: pseudo-sleep reduces CPU to 40 MHz and suspends the TFT controller — it does not use `esp_light_sleep_start()` due to hardware incompatibility with battery power (voltage drop on CPU wake causes POWER_ON reset).
 
 **NTP → RTC write-back (WiFi mode):** After successful NTP sync, time is written to DS3231 on a second boundary (busy-wait for `tv_sec` rollover) to minimize sub-second accumulation error.
@@ -264,7 +272,7 @@ Wake button is GPIO0 (▼ Bottom button) on both boards. RST button also wakes t
 | Trigger | Location | Condition |
 |---------|---------|-----------|
 | Hold BTN2 5 seconds | `src/main.cpp` | In TOTP or Password display mode |
-| Hold both buttons 5 seconds | `src/pin_manager.cpp` | During PIN entry |
+| Hold both buttons 1 second | `src/pin_manager.cpp` | During PIN entry (initial screen → deep sleep; confirm screen → back) |
 | PIN lockout | `src/main.cpp` | 5 failed attempts reached |
 | Auto Lock timeout | `src/main.cpp` | Inside pseudo-sleep polling loop when `auto_lock_timeout > 0` |
 | Auto Lock (screen=Never) | `src/main.cpp` | In main loop when `screen_timeout == 0` and `auto_lock_timeout > 0` |
@@ -277,7 +285,7 @@ Before every `esp_deep_sleep_start()` call, `secureShutdown()` is called:
 void secureShutdown() {
     cryptoManager.wipeDeviceKey();      // memset _deviceKey[32]
     keyManager.wipeSecrets();           // zero + clear TOTP secrets
-    passwordManager.wipePasswords();    // zero + clear passwords
+    passwordManager.wipePasswords();    // zero + clear passwords + wildcard session
     secureLayerManager.wipeAllSessions(); // zero session keys, free ECDH context
     #ifdef ARDUINO_LILYGO_T_DISPLAY_S3
     usbHIDManager.end();                // release USB HID (S3 only)
@@ -285,7 +293,38 @@ void secureShutdown() {
 }
 ```
 
-This wipes all sensitive data from RAM before the device enters deep sleep. On S3, USB HID is also properly released.
+This wipes all sensitive data from RAM before the device enters deep sleep. The `wipePasswords()` call internally invokes `wipeWildcardSession()`, which uses `secureWipeString()` to zero the cached wildcard password value (see security_model.md for wildcard RAM zeroing details). On S3, USB HID is also properly released.
+
+### Secure Restart
+
+A parallel wrapper, `secureRestart()`, performs the identical wipe sequence
+before `ESP.restart()` (used for warm reboots, as opposed to `secureShutdown()`
+which precedes `esp_deep_sleep_start()`):
+
+```cpp
+void secureRestart() {
+    wipeWildcardSession();
+    CryptoManager::getInstance().wipeDeviceKey();
+    keyManager.wipeSecrets();
+    passwordManager.wipePasswords();
+#ifdef SECURE_LAYER_ENABLED
+    secureLayerManager.wipeAllSessions();
+#endif
+    ESP.restart();
+}
+```
+
+**Call sites (25 total):**
+- `shouldRestart` flag handler (web-triggered config changes: theme, boot mode, WiFi credentials, BLE/mDNS settings)
+- Factory Reset, PIN Disable confirmation, Hidden Space removal confirmation
+- Hidden Space setup flow (all 4 exit paths — cancel, wrong PIN, cancel, success — additionally zero the local PIN strings `spaceAPin`/`newPin`/`confirmPin` via `secureWipeString()` before calling `secureRestart()`)
+- 17 web cabinet API endpoints (`/api/reboot`, `/api/reboot_with_web`, `/api/change_ap_password`, `/api/hidden_space`, `/api/enter_import_export_mode`) across direct, tunneled, and obfuscated routing paths
+
+**Intentionally left as bare `ESP.restart()`** (no wipe, by design):
+- Duress PIN wipe path — already performs a more thorough forensic wipe before restart
+- Emergency low-memory restart (<20KB free heap) — calling additional functions at this threshold risks a crash before restart completes
+- Legacy unencrypted key load failure — no key was ever loaded into RAM
+- Import/Export AP startup failure — only a randomly generated, never-used AP password is in scope
 
 ---
 
@@ -332,7 +371,7 @@ Sessions are stored encrypted in `/session.json.enc`. They survive reboots. Dura
 
 URL obfuscation mappings are fully pre-generated at startup via `registerCriticalEndpoint()` rather than on-demand. This avoids repeated flash writes during normal operation — all 38 mappings are written once per epoch (every 30 reboots).
 
-**Note:** `config.json` is plaintext but contains no secrets — the AP password field within it is individually encrypted. PIN length in `/.sys_ui_prefs` is not sensitive; it reduces brute-force search space marginally but PBKDF2 cost makes this irrelevant in practice.
+**Note:** `config.json` is plaintext but contains no secrets — the AP password field within it is individually encrypted. PIN length in `/.sys_ui_prefs` is no longer visually observable on-screen (fixed-width mask displays all 10 slots regardless of configured length); however, auto-submit timing still reveals approximate length to a live observer — documented known limitation, accepted trade-off for two-button UX. PBKDF2 cost makes brute-force attacks impractical regardless.
 
 ---
 
@@ -348,6 +387,9 @@ Visual indicators displayed on device screen when viewing passwords:
 | **DUP** | Duplicate password (used elsewhere) | Amber |
 | **PIN** | Password contains only digits | Red |
 | **NAME** | Password contains account name | Orange |
+| **ENT** | Auto-send enabled (auto-types on selection) | Green |
+| **L/T** or **L/E** | Login field enabled (Tab or Enter navigation mode) | Cyan |
+| **RND** | Wildcard password (randomly generated) | Magenta |
 
 Badges are rendered by `DisplayManager::drawPasswordPage()` and help users identify security issues.
 
@@ -395,3 +437,25 @@ USB HID keyboard functionality is exclusive to T-Display-S3 due to native USB-OT
 - `USBHIDManager::begin()` called during Phase 1 (Hardware init) if enabled
 - Uses `USB.begin()` and `Keyboard.begin()` from ESP32-S3 USB library
 - Properly released in `secureShutdown()` before deep sleep
+
+---
+
+## Runtime Data Structures & Optimization
+
+To minimize RAM allocations and avoid execution overhead during frequent
+read operations:
+
+- **Const references:** Getters in `KeyManager` and `PasswordManager`
+  (`getAllKeys()`, `getAllPasswords()`) return `const std::vector<T>&`
+  directly to internal storage instead of returning copies. Callers use
+  `const auto&` to bind without copying.
+- **Deferred/write-time sorting:** Sorting by `order` happens only during
+  mutating operations (`loadKeys()`/`loadPasswords()`, `reorderKeys()`/
+  `reorderPasswords()`, `replaceAllKeys()`/`replaceAllPasswords()` on
+  import) rather than on every read. Getters no longer sort or mutate
+  state, making them safe to call frequently (e.g. every 250ms from the
+  main loop TOTP display) without repeated allocation or CPU cost.
+- **Rule for new managers:** any future manager holding a
+  `std::vector<T>` member should follow this same pattern — expose reads
+  via `const std::vector<T>&`, and perform any list-order maintenance at
+  the point of mutation, not inside the getter.

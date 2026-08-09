@@ -14,6 +14,7 @@ public:
   bool isConnected();
   void sendPassword(const char* password);
   void sendEnter();
+  void sendTab();
 
 private:
   USBHIDKeyboard _keyboard;

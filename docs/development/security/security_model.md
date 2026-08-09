@@ -101,7 +101,10 @@ indistinguishable from other HMAC files to anyone without `device_key_A`.
 
 **Wipe** 
 
-`wipeHiddenSpace()` performs a complete, ordered cleanup: 
+`removeHiddenSpaceWithPin()` performs a complete, ordered cleanup, using
+Space B's own key (obtained non-destructively via a dry-run PIN check)
+to correctly address Space B's files rather than the caller's active
+Space A key: 
 
 1. Overwrite Slot B (80 bytes) with CSPRNG random data 
 2. Derive and delete all 10 HMAC-path files 
@@ -118,8 +121,54 @@ indistinguishable from other HMAC files to anyone without `device_key_A`.
 | Shared global config | Theme, BLE name, mDNS, RTC — by design; device appears uniform | 
 
 **Implementation:** `src/crypto_manager.cpp` — `tryDecryptSlot()`, 
-`createHiddenSpace()`, `wipeHiddenSpace()`, `initSpacePaths()`, 
+`createHiddenSpace()`, `removeHiddenSpaceWithPin()`, `initSpacePaths()`, 
 `deriveSpaceBSentinelPath()`
+
+### Wildcard Passwords (singleton constraint, session-based generation)
+
+**Data model:** Wildcard passwords are system-managed singleton entries where the actual password value is randomly generated on-device during HID transmission and never persisted to flash or transmitted over the network.
+
+**Singleton constraint:**
+- Maximum one wildcard entry allowed system-wide
+- Enforced at creation: `PasswordManager::addPassword()` rejects if wildcard entry already exists
+- Enforced at import: `PasswordManager::replaceAllPasswords()` downgrades subsequent wildcard-flagged entries to normal entries (first wildcard wins, extras logged as downgraded)
+- Immutable: wildcard status cannot be changed via `updatePassword()` after creation
+
+**Entry properties:**
+- `name`: Always system-managed value `"random"` (not user-editable)
+- `password`: Stores placeholder `"[wildcard]"` in encrypted file (actual value never persisted)
+- `category`: Intentionally unavailable (disabled in UI and not stored) — wildcard entries have no category assignment
+- `wildcard_len`: User-configurable (4-64, default 16), stored per-entry, editable via update endpoint
+
+**Session-based generation:**
+- Actual password generated on-demand via `generateWildcardPassword(int len)` in `src/main.cpp`
+- Uses `CryptoManager::getInstance().secureRandom()` with modulo-bias protection
+- Character set: `a-zA-Z0-9` + special symbols `!@#$%^&*()_+-=[]{}|;:,.<>?~`
+- **Session cache:** `_wildcardSessionValue` (static String) stores generated value for current HID session
+- **Session owner:** `_wildcardSessionOwnerIndex` tracks which password entry owns current session
+- **Session reuse:** Same generated password returned for repeated calls within same session (fixes password/confirm-password mismatch)
+- **Session invalidation:** New value generated when switching to different password entry OR entering HID mode
+
+**RAM zeroing (best-effort, not secure_memzero equivalent):**
+
+Session cache is zeroed via `String::setCharAt(i, '\0')` at:
+1. Before generating new value (in `getWildcardSessionPassword()` — prevents old buffer freed with password still readable)
+2. On secure shutdown (`secureShutdown()` → `wipeWildcardSession()`)
+3. On HID mode entry (before BLE/USB choice — forces fresh generation)
+4. After HID transmission (local `password` copy zeroed immediately after `sendPassword()` in both BLE and USB blocks)
+
+**Known limitations (documented residual risks):**
+- All password/PIN String zeroing now uses `secureWipeString()` (volatile-pointer based, `include/secure_utils.h`), which provides the same compiler-optimization guarantee as `secure_memzero()`. This applies to wildcard session cache, HID transmission buffers, local password copies, and Hidden Space setup PIN strings.
+- Arduino `String` internal reallocation may leave fragments in heap (WString.h behavior, not patchable without core modification) — this is a platform constraint independent of the zeroing method used
+- `generateWildcardPassword()` return value optimizations (NRVO/move-semantics) not explicitly controlled — potential temporary copies
+- Intermediate buffers during `String` growth via `result += char` may persist until next heap allocation overwrites them
+
+**Hidden Space isolation:**
+- Wildcard session cache (`_wildcardSessionValue`, `_wildcardSessionOwnerIndex`) is RAM-only global state
+- Space A/Space B switching requires full device reboot — all RAM is cleared, including session cache
+- No cross-space leakage possible (architectural property, not explicit wipe — reboot guarantees clean state)
+
+**Implementation:** `src/main.cpp` (generation, session management, zeroing), `src/PasswordManager.cpp` (singleton guards), `src/web_server.cpp` (API handlers)
 
 ### PBKDF2 Parameters
 
@@ -144,6 +193,23 @@ The web interface runs over HTTP. TLS is impractical on ESP32 given RAM constrai
 **Key exchange:** Client and server perform ECDH on P-256. The shared secret is processed through HKDF-HMAC-SHA256 with a server-generated random salt to produce a 32-byte AES session key. The session key is never transmitted — each side derives it independently. The client generates a new ephemeral key pair per connection; the private key is discarded after derivation, providing forward secrecy.
 
 **Message encryption:** Every request and response body is encrypted with AES-256-GCM. GCM provides both confidentiality and authenticated integrity — any modification to ciphertext in transit causes tag validation to fail and the message is rejected. There is no plaintext fallback: if no valid encrypted session exists, the server returns an error.
+
+**Encrypted envelope format:** All encrypted requests and responses use
+a JSON envelope where binary cryptographic parameters are Base64-encoded
+(previously Hex, migrated to reduce transport overhead by ~30%):
+
+```json
+{
+  "type": "secure",
+  "counter": 12,
+  "data": "Base64(ciphertext)",
+  "iv": "Base64(12-byte GCM IV)",
+  "tag": "Base64(16-byte GCM tag)"
+}
+```
+
+The `counter` field provides replay protection (monotonically increasing
+per session, rejected if not strictly greater than the last seen value).
 
 **Client-side crypto:** Both the ECDH and AES-GCM implementations are embedded inline in the served HTML page (no CDN). This ensures Layer 4 works in AP mode and without internet access.
 
@@ -204,6 +270,7 @@ These layers do not provide cryptographic security. They make it harder for a pa
 | Replay attacks | GCM IV uniqueness + session counters |
 | Endpoint enumeration | URL obfuscation |
 | Traffic pattern analysis | URL/method/traffic obfuscation |
+| Wrong-file-type import (passwords file submitted to keys import, or vice versa) | Schema validation on decrypted payload (required-field check) before write, in Secure Import/Export Mode |
 
 ### Out of Scope
 
@@ -213,6 +280,7 @@ These layers do not provide cryptographic security. They make it harder for a pa
 | Malicious firmware | No secure boot |
 | Physical hardware tampering | No tamper detection hardware |
 | Side-channel attacks | Hardware constraints |
+| PIN length disclosure via timing | Auto-submit reveals length to live observer; accepted UX trade-off |
 
 ### Assumptions
 

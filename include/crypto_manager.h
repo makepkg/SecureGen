@@ -130,8 +130,10 @@ public:
     // Create hidden space (slot B) with a different PIN - must be called from Space A
     bool createHiddenSpace(const String& pin);
     
-    // Wipe hidden space (slot B) - must be called from Space B
-    bool wipeHiddenSpace();
+    // Remove hidden space (slot B) - must be called from Space A, requires
+    // Space B's own PIN to correctly locate and delete its HMAC-derived files.
+    // Does NOT touch _deviceKey/_activeSpace of the caller's active Space A session.
+    bool removeHiddenSpaceWithPin(const String& spaceBPin);
     
     // --- NEW: Space-Aware File Paths ---
     // Get the actual filesystem path for a logical file name based on active space

@@ -37,6 +37,7 @@ public:
     void setWifiManager(WifiManager* wifiManager);
     void setBatteryManager(BatteryManager* manager);
     void clearSession(); // Очистка сессии и CSRF токена
+    void startRestrictedImportExportServer();
 
 private:
     // Handler Functions
@@ -59,6 +60,15 @@ private:
     String generateKeysTable();
     String generatePasswordsTable();
     String getAdminPasswordHash(); // <-- Added declaration
+
+    // Restricted Import/Export mode — standalone, request-agnostic helpers.
+    // Do not add auth/CSRF/session logic here; that is intentionally
+    // handled by the caller (ordinary handlers keep their own checks,
+    // restricted-mode handlers use their own, simpler validation).
+    String exportKeysEncryptedRestricted(const String& password);
+    bool importKeysEncryptedRestricted(const String& fileContent, const String& password, String& errorOut);
+    String exportPasswordsEncryptedRestricted(const String& password);
+    bool importPasswordsEncryptedRestricted(const String& fileContent, const String& password, String& errorOut);
 
     AsyncWebServer server;
     KeyManager& keyManager;

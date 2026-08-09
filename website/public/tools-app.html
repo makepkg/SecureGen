@@ -218,11 +218,11 @@
 <script>
 // ── i18n ──
 const TOOL_I18N = {
-en: {subtitle:'Offline Export Decryption Tool','create.keys':'➕ Create TOTP Keys File','create.passwords':'➕ Create Passwords File','pw.label':'Password','pw.placeholder':'Enter export password…','pw.hint':'Same password as the web cabinet admin password','decrypt.btn':'🔓 Decrypt','add.row':'➕ Add Row','change.pw':'🔑 Change Password','copy.csv':'📋 Copy CSV','download.json':'⬇️ Download JSON','save.encrypted':'🔒 Save Encrypted','editable.hint':'💡 All fields are editable — click to modify values','security.offline':'🛡️ Fully offline.','security.note':'Your data never leaves this device.','security.extended':'✨ Extended format support:','security.formats':'TOTP/HOTP, SHA1/SHA256/SHA512, 6/8 digits, custom periods.','modal.changepw.title':'🔑 Change Password','modal.changepw.desc':'Enter a new password to re-encrypt the file. This password will be required to import the file on the device.','modal.current.pw':'Current Password','modal.current.pw.ph':'Current password…','modal.new.pw':'New Password','modal.new.pw.ph':'New password…','modal.confirm.pw':'Confirm New Password','modal.confirm.pw.ph':'Confirm new password…','modal.cancel':'Cancel','modal.apply':'Apply','modal.create.title':'➕ Create New File','modal.create.desc':'Create a new empty encrypted file. You can add entries and import it to your device.','modal.create.keys.title':'➕ Create TOTP Keys File','modal.create.keys.desc':'Create a new empty TOTP/HOTP keys file. You can add entries and import it to your device.','modal.create.pw.title':'➕ Create Passwords File','modal.create.pw.desc':'Create a new empty passwords file. You can add entries and import it to your device.','modal.create.pw.ph':'Enter password for new file…','modal.create.pw.hint':'Use the same password as your device admin password','modal.create.confirm.label':'Confirm Password','modal.create.confirm.ph':'Confirm password…','modal.create.btn':'Create','err.pw.empty':'❌ Password cannot be empty','err.pw.match':'❌ Passwords do not match','created':'✅ New file created! Add entries and save.','err.create':'❌ Failed to create file: ','file.loaded':'File loaded — enter password and decrypt.','err.file':'Could not read file.','err.no.file':'Please select a file first.','err.no.pw':'Please enter the password.','decrypting':'Decrypting…','decrypted':'✅ Decrypted successfully!','err.wrong.pw':'❌ Wrong password or corrupted file.','err.decrypt.first':'Decrypt first.','err.encrypt':'❌ Encryption failed: ','err.format':'Invalid data format.','table.pw.title':'🔑 Passwords','table.keys.title':'🔐 TOTP Keys','col.name':'Name','col.password':'Password','col.secret':'Secret','col.type':'Type','col.algorithm':'Algorithm','col.digits':'Digits','col.period':'Period/Counter','period.ph':'Period (s)','counter.ph':'Counter','modal.pw.incorrect':'❌ Current password is incorrect','modal.pw.new.empty':'❌ New password cannot be empty','modal.pw.changed':'✅ Password changed successfully!','modal.pw.err':'❌ Failed to change password: ','reencrypted':'✅ File re-encrypted with new password!','col.category':'Category','cat.none':'— None —','cat.web':'🌐 Web','cat.app':'📱 App','cat.local':'🖥 Local','cat.key':'🔑 Key / Token','col.auto_send':'Auto ⏎'},
-ru: {subtitle:'Инструмент расшифровки экспорта','create.keys':'➕ Создать файл TOTP-ключей','create.passwords':'➕ Создать файл паролей','pw.label':'Пароль','pw.placeholder':'Введите пароль экспорта…','pw.hint':'Тот же пароль, что и пароль веб-кабинета','decrypt.btn':'🔓 Расшифровать','add.row':'➕ Добавить строку','change.pw':'🔑 Сменить пароль','copy.csv':'📋 Копировать CSV','download.json':'⬇️ Скачать JSON','save.encrypted':'🔒 Сохранить зашифрованным','editable.hint':'💡 Все поля редактируемы — нажмите для изменения','security.offline':'🛡️ Полностью офлайн.','security.note':'Ваши данные не покидают устройство.','security.extended':'✨ Расширенная поддержка форматов:','security.formats':'TOTP/HOTP, SHA1/SHA256/SHA512, 6/8 цифр, произвольные периоды.','modal.changepw.title':'🔑 Сменить пароль','modal.changepw.desc':'Введите новый пароль для перешифрования файла. Этот пароль потребуется для импорта файла на устройство.','modal.current.pw':'Текущий пароль','modal.current.pw.ph':'Текущий пароль…','modal.new.pw':'Новый пароль','modal.new.pw.ph':'Новый пароль…','modal.confirm.pw':'Подтвердите новый пароль','modal.confirm.pw.ph':'Подтвердите пароль…','modal.cancel':'Отмена','modal.apply':'Применить','modal.create.title':'➕ Создать новый файл','modal.create.desc':'Создайте новый пустой зашифрованный файл. Добавьте записи и импортируйте на устройство.','modal.create.keys.title':'➕ Создать файл TOTP-ключей','modal.create.keys.desc':'Создайте новый пустой файл TOTP/HOTP-ключей. Добавьте записи и импортируйте на устройство.','modal.create.pw.title':'➕ Создать файл паролей','modal.create.pw.desc':'Создайте новый пустой файл паролей. Добавьте записи и импортируйте на устройство.','modal.create.pw.ph':'Введите пароль для нового файла…','modal.create.pw.hint':'Используйте тот же пароль, что и на устройстве','modal.create.confirm.label':'Подтвердите пароль','modal.create.confirm.ph':'Подтвердите пароль…','modal.create.btn':'Создать','err.pw.empty':'❌ Пароль не может быть пустым','err.pw.match':'❌ Пароли не совпадают','created':'✅ Новый файл создан! Добавьте записи и сохраните.','err.create':'❌ Ошибка создания файла: ','file.loaded':'Файл загружен — введите пароль и расшифруйте.','err.file':'Не удалось прочитать файл.','err.no.file':'Сначала выберите файл.','err.no.pw':'Введите пароль.','decrypting':'Расшифровка…','decrypted':'✅ Успешно расшифровано!','err.wrong.pw':'❌ Неверный пароль или повреждённый файл.','err.decrypt.first':'Сначала расшифруйте.','err.encrypt':'❌ Ошибка шифрования: ','err.format':'Неверный формат данных.','table.pw.title':'🔑 Пароли','table.keys.title':'🔐 TOTP-ключи','col.name':'Имя','col.password':'Пароль','col.secret':'Секрет','col.type':'Тип','col.algorithm':'Алгоритм','col.digits':'Цифры','col.period':'Период/Счётчик','period.ph':'Период (с)','counter.ph':'Счётчик','modal.pw.incorrect':'❌ Текущий пароль неверен','modal.pw.new.empty':'❌ Новый пароль не может быть пустым','modal.pw.changed':'✅ Пароль успешно изменён!','modal.pw.err':'❌ Ошибка смены пароля: ','reencrypted':'✅ Файл перешифрован с новым паролем!','col.category':'Категория','cat.none':'— Нет —','cat.web':'🌐 Веб','cat.app':'📱 Приложение','cat.local':'🖥 Локальный','cat.key':'🔑 Ключ / Токен'},
-de: {subtitle:'Offline-Exportentschlüsselungswerkzeug','create.keys':'➕ TOTP-Schlüsseldatei erstellen','create.passwords':'➕ Passwortdatei erstellen','pw.label':'Passwort','pw.placeholder':'Export-Passwort eingeben…','pw.hint':'Dasselbe Passwort wie das Web-Kabinett-Admin-Passwort','decrypt.btn':'🔓 Entschlüsseln','add.row':'➕ Zeile hinzufügen','change.pw':'🔑 Passwort ändern','copy.csv':'📋 CSV kopieren','download.json':'⬇️ JSON herunterladen','save.encrypted':'🔒 Verschlüsselt speichern','editable.hint':'💡 Alle Felder sind bearbeitbar — zum Ändern klicken','security.offline':'🛡️ Vollständig offline.','security.note':'Ihre Daten verlassen dieses Gerät nicht.','security.extended':'✨ Erweiterte Formatunterstützung:','security.formats':'TOTP/HOTP, SHA1/SHA256/SHA512, 6/8 Stellen, benutzerdefinierte Perioden.','modal.changepw.title':'🔑 Passwort ändern','modal.changepw.desc':'Neues Passwort eingeben, um die Datei neu zu verschlüsseln. Dieses Passwort wird beim Import auf dem Gerät benötigt.','modal.current.pw':'Aktuelles Passwort','modal.current.pw.ph':'Aktuelles Passwort…','modal.new.pw':'Neues Passwort','modal.new.pw.ph':'Neues Passwort…','modal.confirm.pw':'Neues Passwort bestätigen','modal.confirm.pw.ph':'Passwort bestätigen…','modal.cancel':'Abbrechen','modal.apply':'Anwenden','modal.create.title':'➕ Neue Datei erstellen','modal.create.desc':'Neue leere verschlüsselte Datei erstellen. Einträge hinzufügen und auf Gerät importieren.','modal.create.keys.title':'➕ TOTP-Schlüsseldatei erstellen','modal.create.keys.desc':'Neue leere TOTP/HOTP-Schlüsseldatei erstellen. Einträge hinzufügen und importieren.','modal.create.pw.title':'➕ Passwortdatei erstellen','modal.create.pw.desc':'Neue leere Passwortdatei erstellen. Einträge hinzufügen und importieren.','modal.create.pw.ph':'Passwort für neue Datei eingeben…','modal.create.pw.hint':'Dasselbe Passwort wie auf dem Gerät verwenden','modal.create.confirm.label':'Passwort bestätigen','modal.create.confirm.ph':'Passwort bestätigen…','modal.create.btn':'Erstellen','err.pw.empty':'❌ Passwort darf nicht leer sein','err.pw.match':'❌ Passwörter stimmen nicht überein','created':'✅ Neue Datei erstellt! Einträge hinzufügen und speichern.','err.create':'❌ Datei konnte nicht erstellt werden: ','file.loaded':'Datei geladen — Passwort eingeben und entschlüsseln.','err.file':'Datei konnte nicht gelesen werden.','err.no.file':'Bitte zuerst eine Datei auswählen.','err.no.pw':'Bitte Passwort eingeben.','decrypting':'Entschlüsseln…','decrypted':'✅ Erfolgreich entschlüsselt!','err.wrong.pw':'❌ Falsches Passwort oder beschädigte Datei.','err.decrypt.first':'Zuerst entschlüsseln.','err.encrypt':'❌ Verschlüsselung fehlgeschlagen: ','err.format':'Ungültiges Datenformat.','table.pw.title':'🔑 Passwörter','table.keys.title':'🔐 TOTP-Schlüssel','col.name':'Name','col.password':'Passwort','col.secret':'Geheimnis','col.type':'Typ','col.algorithm':'Algorithmus','col.digits':'Stellen','col.period':'Periode/Zähler','period.ph':'Periode (s)','counter.ph':'Zähler','modal.pw.incorrect':'❌ Aktuelles Passwort ist falsch','modal.pw.new.empty':'❌ Neues Passwort darf nicht leer sein','modal.pw.changed':'✅ Passwort erfolgreich geändert!','modal.pw.err':'❌ Passwortänderung fehlgeschlagen: ','reencrypted':'✅ Datei mit neuem Passwort neu verschlüsselt!','col.category':'Kategorie','cat.none':'— Keine —','cat.web':'🌐 Web','cat.app':'📱 App','cat.local':'🖥 Lokal','cat.key':'🔑 Schlüssel / Token'},
-zh: {subtitle:'离线导出解密工具','create.keys':'➕ 创建TOTP密钥文件','create.passwords':'➕ 创建密码文件','pw.label':'密码','pw.placeholder':'输入导出密码…','pw.hint':'与Web控制台管理员密码相同','decrypt.btn':'🔓 解密','add.row':'➕ 添加行','change.pw':'🔑 更改密码','copy.csv':'📋 复制CSV','download.json':'⬇️ 下载JSON','save.encrypted':'🔒 保存加密文件','editable.hint':'💡 所有字段均可编辑 — 点击修改','security.offline':'🛡️ 完全离线。','security.note':'您的数据不会离开此设备。','security.extended':'✨ 扩展格式支持：','security.formats':'TOTP/HOTP、SHA1/SHA256/SHA512、6/8位、自定义周期。','modal.changepw.title':'🔑 更改密码','modal.changepw.desc':'输入新密码以重新加密文件。在设备上导入文件时需要此密码。','modal.current.pw':'当前密码','modal.current.pw.ph':'当前密码…','modal.new.pw':'新密码','modal.new.pw.ph':'新密码…','modal.confirm.pw':'确认新密码','modal.confirm.pw.ph':'确认密码…','modal.cancel':'取消','modal.apply':'应用','modal.create.title':'➕ 创建新文件','modal.create.desc':'创建新的空加密文件，添加条目后导入设备。','modal.create.keys.title':'➕ 创建TOTP密钥文件','modal.create.keys.desc':'创建新的空TOTP/HOTP密钥文件，添加条目后导入。','modal.create.pw.title':'➕ 创建密码文件','modal.create.pw.desc':'创建新的空密码文件，添加条目后导入。','modal.create.pw.ph':'输入新文件密码…','modal.create.pw.hint':'使用与设备相同的密码','modal.create.confirm.label':'确认密码','modal.create.confirm.ph':'确认密码…','modal.create.btn':'创建','err.pw.empty':'❌ 密码不能为空','err.pw.match':'❌ 密码不匹配','created':'✅ 新文件已创建！添加条目并保存。','err.create':'❌ 创建文件失败：','file.loaded':'文件已加载 — 输入密码并解密。','err.file':'无法读取文件。','err.no.file':'请先选择文件。','err.no.pw':'请输入密码。','decrypting':'解密中…','decrypted':'✅ 解密成功！','err.wrong.pw':'❌ 密码错误或文件损坏。','err.decrypt.first':'请先解密。','err.encrypt':'❌ 加密失败：','err.format':'数据格式无效。','table.pw.title':'🔑 密码','table.keys.title':'🔐 TOTP密钥','col.name':'名称','col.password':'密码','col.secret':'密钥','col.type':'类型','col.algorithm':'算法','col.digits':'位数','col.period':'周期/计数器','period.ph':'周期（秒）','counter.ph':'计数器','modal.pw.incorrect':'❌ 当前密码不正确','modal.pw.new.empty':'❌ 新密码不能为空','modal.pw.changed':'✅ 密码更改成功！','modal.pw.err':'❌ 密码更改失败：','reencrypted':'✅ 文件已用新密码重新加密！','col.category':'类别','cat.none':'— 无 —','cat.web':'🌐 网页','cat.app':'📱 应用','cat.local':'🖥 本地','cat.key':'🔑 密钥 / 令牌'},
-es: {subtitle:'Herramienta de descifrado de exportación','create.keys':'➕ Crear archivo de claves TOTP','create.passwords':'➕ Crear archivo de contraseñas','pw.label':'Contraseña','pw.placeholder':'Introducir contraseña de exportación…','pw.hint':'La misma contraseña que la del panel web','decrypt.btn':'🔓 Descifrar','add.row':'➕ Añadir fila','change.pw':'🔑 Cambiar contraseña','copy.csv':'📋 Copiar CSV','download.json':'⬇️ Descargar JSON','save.encrypted':'🔒 Guardar cifrado','editable.hint':'💡 Todos los campos son editables — haz clic para modificar','security.offline':'🛡️ Completamente offline.','security.note':'Sus datos nunca abandonan este dispositivo.','security.extended':'✨ Soporte de formato extendido:','security.formats':'TOTP/HOTP, SHA1/SHA256/SHA512, 6/8 dígitos, períodos personalizados.','modal.changepw.title':'🔑 Cambiar contraseña','modal.changepw.desc':'Introduce una nueva contraseña para re-cifrar el archivo. Esta contraseña será necesaria para importar el archivo en el dispositivo.','modal.current.pw':'Contraseña actual','modal.current.pw.ph':'Contraseña actual…','modal.new.pw':'Nueva contraseña','modal.new.pw.ph':'Nueva contraseña…','modal.confirm.pw':'Confirmar nueva contraseña','modal.confirm.pw.ph':'Confirmar contraseña…','modal.cancel':'Cancelar','modal.apply':'Aplicar','modal.create.title':'➕ Crear nuevo archivo','modal.create.desc':'Crear un nuevo archivo cifrado vacío. Añade entradas e impórtalo a tu dispositivo.','modal.create.keys.title':'➕ Crear archivo de claves TOTP','modal.create.keys.desc':'Crear un nuevo archivo TOTP/HOTP vacío. Añade entradas e impórtalo.','modal.create.pw.title':'➕ Crear archivo de contraseñas','modal.create.pw.desc':'Crear un nuevo archivo de contraseñas vacío. Añade entradas e impórtalo.','modal.create.pw.ph':'Introducir contraseña para el nuevo archivo…','modal.create.pw.hint':'Usa la misma contraseña que en el dispositivo','modal.create.confirm.label':'Confirmar contraseña','modal.create.confirm.ph':'Confirmar contraseña…','modal.create.btn':'Crear','err.pw.empty':'❌ La contraseña no puede estar vacía','err.pw.match':'❌ Las contraseñas no coinciden','created':'✅ ¡Nuevo archivo creado! Añade entradas y guarda.','err.create':'❌ Error al crear el archivo: ','file.loaded':'Archivo cargado — introduce la contraseña y descifra.','err.file':'No se pudo leer el archivo.','err.no.file':'Por favor, selecciona un archivo primero.','err.no.pw':'Por favor, introduce la contraseña.','decrypting':'Descifrando…','decrypted':'✅ ¡Descifrado correctamente!','err.wrong.pw':'❌ Contraseña incorrecta o archivo corrupto.','err.decrypt.first':'Primero descifra el archivo.','err.encrypt':'❌ Error de cifrado: ','err.format':'Formato de datos no válido.','table.pw.title':'🔑 Contraseñas','table.keys.title':'🔐 Claves TOTP','col.name':'Nombre','col.password':'Contraseña','col.secret':'Secreto','col.type':'Tipo','col.algorithm':'Algoritmo','col.digits':'Dígitos','col.period':'Período/Contador','period.ph':'Período (s)','counter.ph':'Contador','modal.pw.incorrect':'❌ La contraseña actual es incorrecta','modal.pw.new.empty':'❌ La nueva contraseña no puede estar vacía','modal.pw.changed':'✅ ¡Contraseña cambiada correctamente!','modal.pw.err':'❌ Error al cambiar la contraseña: ','reencrypted':'✅ ¡Archivo re-cifrado con nueva contraseña!','col.category':'Categoría','cat.none':'— Ninguna —','cat.web':'🌐 Web','cat.app':'📱 App','cat.local':'🖥 Local','cat.key':'🔑 Clave / Token'}
+en: {subtitle:'Offline Export Decryption Tool','create.keys':'➕ Create TOTP Keys File','create.passwords':'➕ Create Passwords File','pw.label':'Password','pw.placeholder':'Enter export password…','pw.hint':'Same password as the web cabinet admin password','decrypt.btn':'🔓 Decrypt','add.row':'➕ Add Row','change.pw':'🔑 Change Password','copy.csv':'📋 Copy CSV','download.json':'⬇️ Download JSON','save.encrypted':'🔒 Save Encrypted','editable.hint':'💡 All fields are editable — click to modify values','security.offline':'🛡️ Fully offline.','security.note':'Your data never leaves this device.','security.extended':'✨ Extended format support:','security.formats':'TOTP/HOTP, SHA1/SHA256/SHA512, 6/8 digits, custom periods.','modal.changepw.title':'🔑 Change Password','modal.changepw.desc':'Enter a new password to re-encrypt the file. This password will be required to import the file on the device.','modal.current.pw':'Current Password','modal.current.pw.ph':'Current password…','modal.new.pw':'New Password','modal.new.pw.ph':'New password…','modal.confirm.pw':'Confirm New Password','modal.confirm.pw.ph':'Confirm new password…','modal.cancel':'Cancel','modal.apply':'Apply','modal.create.title':'➕ Create New File','modal.create.desc':'Create a new empty encrypted file. You can add entries and import it to your device.','modal.create.keys.title':'➕ Create TOTP Keys File','modal.create.keys.desc':'Create a new empty TOTP/HOTP keys file. You can add entries and import it to your device.','modal.create.pw.title':'➕ Create Passwords File','modal.create.pw.desc':'Create a new empty passwords file. You can add entries and import it to your device.','modal.create.pw.ph':'Enter password for new file…','modal.create.pw.hint':'Use the same password as your device admin password','modal.create.confirm.label':'Confirm Password','modal.create.confirm.ph':'Confirm password…','modal.create.btn':'Create','err.pw.empty':'❌ Password cannot be empty','err.pw.match':'❌ Passwords do not match','created':'✅ New file created! Add entries and save.','err.create':'❌ Failed to create file: ','file.loaded':'File loaded — enter password and decrypt.','err.file':'Could not read file.','err.no.file':'Please select a file first.','err.no.pw':'Please enter the password.','decrypting':'Decrypting…','decrypted':'✅ Decrypted successfully!','err.wrong.pw':'❌ Wrong password or corrupted file.','err.decrypt.first':'Decrypt first.','err.encrypt':'❌ Encryption failed: ','err.format':'Invalid data format.','table.pw.title':'🔑 Passwords','table.keys.title':'🔐 TOTP Keys','col.name':'Name','col.password':'Password','col.secret':'Secret','col.type':'Type','col.algorithm':'Algorithm','col.digits':'Digits','col.period':'Period/Counter','col.wc_len':'WC Len','period.ph':'Period (s)','counter.ph':'Counter','modal.pw.incorrect':'❌ Current password is incorrect','modal.pw.new.empty':'❌ New password cannot be empty','modal.pw.changed':'✅ Password changed successfully!','modal.pw.err':'❌ Failed to change password: ','reencrypted':'✅ File re-encrypted with new password!','col.category':'Category','cat.none':'— None —','cat.web':'🌐 Web','cat.app':'📱 App','cat.local':'🖥 Local','cat.key':'🔑 Key / Token','col.auto_send':'Auto ⏎','col.send_login':'Login+PW','col.login':'Login','col.nav_mode':'Nav','col.login_delay':'Delay','wildcard.note':'🎲 Generated on device'},
+ru: {subtitle:'Инструмент расшифровки экспорта','create.keys':'➕ Создать файл TOTP-ключей','create.passwords':'➕ Создать файл паролей','pw.label':'Пароль','pw.placeholder':'Введите пароль экспорта…','pw.hint':'Тот же пароль, что и пароль веб-кабинета','decrypt.btn':'🔓 Расшифровать','add.row':'➕ Добавить строку','change.pw':'🔑 Сменить пароль','copy.csv':'📋 Копировать CSV','download.json':'⬇️ Скачать JSON','save.encrypted':'🔒 Сохранить зашифрованным','editable.hint':'💡 Все поля редактируемы — нажмите для изменения','security.offline':'🛡️ Полностью офлайн.','security.note':'Ваши данные не покидают устройство.','security.extended':'✨ Расширенная поддержка форматов:','security.formats':'TOTP/HOTP, SHA1/SHA256/SHA512, 6/8 цифр, произвольные периоды.','modal.changepw.title':'🔑 Сменить пароль','modal.changepw.desc':'Введите новый пароль для перешифрования файла. Этот пароль потребуется для импорта файла на устройство.','modal.current.pw':'Текущий пароль','modal.current.pw.ph':'Текущий пароль…','modal.new.pw':'Новый пароль','modal.new.pw.ph':'Новый пароль…','modal.confirm.pw':'Подтвердите новый пароль','modal.confirm.pw.ph':'Подтвердите пароль…','modal.cancel':'Отмена','modal.apply':'Применить','modal.create.title':'➕ Создать новый файл','modal.create.desc':'Создайте новый пустой зашифрованный файл. Добавьте записи и импортируйте на устройство.','modal.create.keys.title':'➕ Создать файл TOTP-ключей','modal.create.keys.desc':'Создайте новый пустой файл TOTP/HOTP-ключей. Добавьте записи и импортируйте на устройство.','modal.create.pw.title':'➕ Создать файл паролей','modal.create.pw.desc':'Создайте новый пустой файл паролей. Добавьте записи и импортируйте на устройство.','modal.create.pw.ph':'Введите пароль для нового файла…','modal.create.pw.hint':'Используйте тот же пароль, что и на устройстве','modal.create.confirm.label':'Подтвердите пароль','modal.create.confirm.ph':'Подтвердите пароль…','modal.create.btn':'Создать','err.pw.empty':'❌ Пароль не может быть пустым','err.pw.match':'❌ Пароли не совпадают','created':'✅ Новый файл создан! Добавьте записи и сохраните.','err.create':'❌ Ошибка создания файла: ','file.loaded':'Файл загружен — введите пароль и расшифруйте.','err.file':'Не удалось прочитать файл.','err.no.file':'Сначала выберите файл.','err.no.pw':'Введите пароль.','decrypting':'Расшифровка…','decrypted':'✅ Успешно расшифровано!','err.wrong.pw':'❌ Неверный пароль или повреждённый файл.','err.decrypt.first':'Сначала расшифруйте.','err.encrypt':'❌ Ошибка шифрования: ','err.format':'Неверный формат данных.','table.pw.title':'🔑 Пароли','table.keys.title':'🔐 TOTP-ключи','col.name':'Имя','col.password':'Пароль','col.secret':'Секрет','col.type':'Тип','col.algorithm':'Алгоритм','col.digits':'Цифры','col.period':'Период/Счётчик','col.wc_len':'Длина','period.ph':'Период (с)','counter.ph':'Счётчик','modal.pw.incorrect':'❌ Текущий пароль неверен','modal.pw.new.empty':'❌ Новый пароль не может быть пустым','modal.pw.changed':'✅ Пароль успешно изменён!','modal.pw.err':'❌ Ошибка смены пароля: ','reencrypted':'✅ Файл перешифрован с новым паролем!','col.category':'Категория','cat.none':'— Нет —','cat.web':'🌐 Веб','cat.app':'📱 Приложение','cat.local':'🖥 Локальный','cat.key':'🔑 Ключ / Токен','col.auto_send':'Авто ⏎','col.send_login':'Логин+ПА','col.login':'Логин','col.nav_mode':'Навигация','col.login_delay':'Задержка','wildcard.note':'🎲 Генерируется на устройстве'},
+de: {subtitle:'Offline-Exportentschlüsselungswerkzeug','create.keys':'➕ TOTP-Schlüsseldatei erstellen','create.passwords':'➕ Passwortdatei erstellen','pw.label':'Passwort','pw.placeholder':'Export-Passwort eingeben…','pw.hint':'Dasselbe Passwort wie das Web-Kabinett-Admin-Passwort','decrypt.btn':'🔓 Entschlüsseln','add.row':'➕ Zeile hinzufügen','change.pw':'🔑 Passwort ändern','copy.csv':'📋 CSV kopieren','download.json':'⬇️ JSON herunterladen','save.encrypted':'🔒 Verschlüsselt speichern','editable.hint':'💡 Alle Felder sind bearbeitbar — zum Ändern klicken','security.offline':'🛡️ Vollständig offline.','security.note':'Ihre Daten verlassen dieses Gerät nicht.','security.extended':'✨ Erweiterte Formatunterstützung:','security.formats':'TOTP/HOTP, SHA1/SHA256/SHA512, 6/8 Stellen, benutzerdefinierte Perioden.','modal.changepw.title':'🔑 Passwort ändern','modal.changepw.desc':'Neues Passwort eingeben, um die Datei neu zu verschlüsseln. Dieses Passwort wird beim Import auf dem Gerät benötigt.','modal.current.pw':'Aktuelles Passwort','modal.current.pw.ph':'Aktuelles Passwort…','modal.new.pw':'Neues Passwort','modal.new.pw.ph':'Neues Passwort…','modal.confirm.pw':'Neues Passwort bestätigen','modal.confirm.pw.ph':'Passwort bestätigen…','modal.cancel':'Abbrechen','modal.apply':'Anwenden','modal.create.title':'➕ Neue Datei erstellen','modal.create.desc':'Neue leere verschlüsselte Datei erstellen. Einträge hinzufügen und auf Gerät importieren.','modal.create.keys.title':'➕ TOTP-Schlüsseldatei erstellen','modal.create.keys.desc':'Neue leere TOTP/HOTP-Schlüsseldatei erstellen. Einträge hinzufügen und importieren.','modal.create.pw.title':'➕ Passwortdatei erstellen','modal.create.pw.desc':'Neue leere Passwortdatei erstellen. Einträge hinzufügen und importieren.','modal.create.pw.ph':'Passwort für neue Datei eingeben…','modal.create.pw.hint':'Dasselbe Passwort wie auf dem Gerät verwenden','modal.create.confirm.label':'Passwort bestätigen','modal.create.confirm.ph':'Passwort bestätigen…','modal.create.btn':'Erstellen','err.pw.empty':'❌ Passwort darf nicht leer sein','err.pw.match':'❌ Passwörter stimmen nicht überein','created':'✅ Neue Datei erstellt! Einträge hinzufügen und speichern.','err.create':'❌ Datei konnte nicht erstellt werden: ','file.loaded':'Datei geladen — Passwort eingeben und entschlüsseln.','err.file':'Datei konnte nicht gelesen werden.','err.no.file':'Bitte zuerst eine Datei auswählen.','err.no.pw':'Bitte Passwort eingeben.','decrypting':'Entschlüsseln…','decrypted':'✅ Erfolgreich entschlüsselt!','err.wrong.pw':'❌ Falsches Passwort oder beschädigte Datei.','err.decrypt.first':'Zuerst entschlüsseln.','err.encrypt':'❌ Verschlüsselung fehlgeschlagen: ','err.format':'Ungültiges Datenformat.','table.pw.title':'🔑 Passwörter','table.keys.title':'🔐 TOTP-Schlüssel','col.name':'Name','col.password':'Passwort','col.secret':'Geheimnis','col.type':'Typ','col.algorithm':'Algorithmus','col.digits':'Stellen','col.period':'Periode/Zähler','col.wc_len':'WC Länge','period.ph':'Periode (s)','counter.ph':'Zähler','modal.pw.incorrect':'❌ Aktuelles Passwort ist falsch','modal.pw.new.empty':'❌ Neues Passwort darf nicht leer sein','modal.pw.changed':'✅ Passwort erfolgreich geändert!','modal.pw.err':'❌ Passwortänderung fehlgeschlagen: ','reencrypted':'✅ Datei mit neuem Passwort neu verschlüsselt!','col.category':'Kategorie','cat.none':'— Keine —','cat.web':'🌐 Web','cat.app':'📱 App','cat.local':'🖥 Lokal','cat.key':'🔑 Schlüssel / Token','col.auto_send':'Auto ⏎','col.send_login':'Login+PW','col.login':'Login','col.nav_mode':'Nav','col.login_delay':'Verzög.','wildcard.note':'🎲 Auf Gerät generiert'},
+zh: {subtitle:'离线导出解密工具','create.keys':'➕ 创建TOTP密钥文件','create.passwords':'➕ 创建密码文件','pw.label':'密码','pw.placeholder':'输入导出密码…','pw.hint':'与Web控制台管理员密码相同','decrypt.btn':'🔓 解密','add.row':'➕ 添加行','change.pw':'🔑 更改密码','copy.csv':'📋 复制CSV','download.json':'⬇️ 下载JSON','save.encrypted':'🔒 保存加密文件','editable.hint':'💡 所有字段均可编辑 — 点击修改','security.offline':'🛡️ 完全离线。','security.note':'您的数据不会离开此设备。','security.extended':'✨ 扩展格式支持：','security.formats':'TOTP/HOTP、SHA1/SHA256/SHA512、6/8位、自定义周期。','modal.changepw.title':'🔑 更改密码','modal.changepw.desc':'输入新密码以重新加密文件。在设备上导入文件时需要此密码。','modal.current.pw':'当前密码','modal.current.pw.ph':'当前密码…','modal.new.pw':'新密码','modal.new.pw.ph':'新密码…','modal.confirm.pw':'确认新密码','modal.confirm.pw.ph':'确认密码…','modal.cancel':'取消','modal.apply':'应用','modal.create.title':'➕ 创建新文件','modal.create.desc':'创建新的空加密文件，添加条目后导入设备。','modal.create.keys.title':'➕ 创建TOTP密钥文件','modal.create.keys.desc':'创建新的空TOTP/HOTP密钥文件，添加条目后导入。','modal.create.pw.title':'➕ 创建密码文件','modal.create.pw.desc':'创建新的空密码文件，添加条目后导入。','modal.create.pw.ph':'输入新文件密码…','modal.create.pw.hint':'使用与设备相同的密码','modal.create.confirm.label':'确认密码','modal.create.confirm.ph':'确认密码…','modal.create.btn':'创建','err.pw.empty':'❌ 密码不能为空','err.pw.match':'❌ 密码不匹配','created':'✅ 新文件已创建！添加条目并保存。','err.create':'❌ 创建文件失败：','file.loaded':'文件已加载 — 输入密码并解密。','err.file':'无法读取文件。','err.no.file':'请先选择文件。','err.no.pw':'请输入密码。','decrypting':'解密中…','decrypted':'✅ 解密成功！','err.wrong.pw':'❌ 密码错误或文件损坏。','err.decrypt.first':'请先解密。','err.encrypt':'❌ 加密失败：','err.format':'数据格式无效。','table.pw.title':'🔑 密码','table.keys.title':'🔐 TOTP密钥','col.name':'名称','col.password':'密码','col.secret':'密钥','col.type':'类型','col.algorithm':'算法','col.digits':'位数','col.period':'周期/计数器','col.wc_len':'长度','period.ph':'周期（秒）','counter.ph':'计数器','modal.pw.incorrect':'❌ 当前密码不正确','modal.pw.new.empty':'❌ 新密码不能为空','modal.pw.changed':'✅ 密码更改成功！','modal.pw.err':'❌ 密码更改失败：','reencrypted':'✅ 文件已用新密码重新加密！','col.category':'类别','cat.none':'— 无 —','cat.web':'🌐 网页','cat.app':'📱 应用','cat.local':'🖥 本地','cat.key':'🔑 密钥 / 令牌','col.auto_send':'自动⏎','col.send_login':'登录+密码','col.login':'登录','col.nav_mode':'导航','col.login_delay':'延迟','wildcard.note':'🎲 在设备上生成'},
+es: {subtitle:'Herramienta de descifrado de exportación','create.keys':'➕ Crear archivo de claves TOTP','create.passwords':'➕ Crear archivo de contraseñas','pw.label':'Contraseña','pw.placeholder':'Introducir contraseña de exportación…','pw.hint':'La misma contraseña que la del panel web','decrypt.btn':'🔓 Descifrar','add.row':'➕ Añadir fila','change.pw':'🔑 Cambiar contraseña','copy.csv':'📋 Copiar CSV','download.json':'⬇️ Descargar JSON','save.encrypted':'🔒 Guardar cifrado','editable.hint':'💡 Todos los campos son editables — haz clic para modificar','security.offline':'🛡️ Completamente offline.','security.note':'Sus datos nunca abandonan este dispositivo.','security.extended':'✨ Soporte de formato extendido:','security.formats':'TOTP/HOTP, SHA1/SHA256/SHA512, 6/8 dígitos, períodos personalizados.','modal.changepw.title':'🔑 Cambiar contraseña','modal.changepw.desc':'Introduce una nueva contraseña para re-cifrar el archivo. Esta contraseña será necesaria para importar el archivo en el dispositivo.','modal.current.pw':'Contraseña actual','modal.current.pw.ph':'Contraseña actual…','modal.new.pw':'Nueva contraseña','modal.new.pw.ph':'Nueva contraseña…','modal.confirm.pw':'Confirmar nueva contraseña','modal.confirm.pw.ph':'Confirmar contraseña…','modal.cancel':'Cancelar','modal.apply':'Aplicar','modal.create.title':'➕ Crear nuevo archivo','modal.create.desc':'Crear un nuevo archivo cifrado vacío. Añade entradas e impórtalo a tu dispositivo.','modal.create.keys.title':'➕ Crear archivo de claves TOTP','modal.create.keys.desc':'Crear un nuevo archivo TOTP/HOTP vacío. Añade entradas e impórtalo.','modal.create.pw.title':'➕ Crear archivo de contraseñas','modal.create.pw.desc':'Crear un nuevo archivo de contraseñas vacío. Añade entradas e impórtalo.','modal.create.pw.ph':'Introducir contraseña para el nuevo archivo…','modal.create.pw.hint':'Usa la misma contraseña que en el dispositivo','modal.create.confirm.label':'Confirmar contraseña','modal.create.confirm.ph':'Confirmar contraseña…','modal.create.btn':'Crear','err.pw.empty':'❌ La contraseña no puede estar vacía','err.pw.match':'❌ Las contraseñas no coinciden','created':'✅ ¡Nuevo archivo creado! Añade entradas y guarda.','err.create':'❌ Error al crear el archivo: ','file.loaded':'Archivo cargado — introduce la contraseña y descifra.','err.file':'No se pudo leer el archivo.','err.no.file':'Por favor, selecciona un archivo primero.','err.no.pw':'Por favor, introduce la contraseña.','decrypting':'Descifrando…','decrypted':'✅ ¡Descifrado correctamente!','err.wrong.pw':'❌ Contraseña incorrecta o archivo corrupto.','err.decrypt.first':'Primero descifra el archivo.','err.encrypt':'❌ Error de cifrado: ','err.format':'Formato de datos no válido.','table.pw.title':'🔑 Contraseñas','table.keys.title':'🔐 Claves TOTP','col.name':'Nombre','col.password':'Contraseña','col.secret':'Secreto','col.type':'Tipo','col.algorithm':'Algoritmo','col.digits':'Dígitos','col.period':'Período/Contador','col.wc_len':'Longitud','period.ph':'Período (s)','counter.ph':'Contador','modal.pw.incorrect':'❌ La contraseña actual es incorrecta','modal.pw.new.empty':'❌ La nueva contraseña no puede estar vacía','modal.pw.changed':'✅ ¡Contraseña cambiada correctamente!','modal.pw.err':'❌ Error al cambiar la contraseña: ','reencrypted':'✅ ¡Archivo re-cifrado con nueva contraseña!','col.category':'Categoría','cat.none':'— Ninguna —','cat.web':'🌐 Web','cat.app':'📱 App','cat.local':'🖥 Local','cat.key':'🔑 Clave / Token','col.auto_send':'Auto ⏎','col.send_login':'Login+PW','col.login':'Login','col.nav_mode':'Nav','col.login_delay':'Retardo','wildcard.note':'🎲 Generado en dispositivo'}
 };
 
 let toolLang = localStorage.getItem('tool_lang') || 'en';
@@ -468,7 +468,7 @@ function renderTable(data) {
     // Build duplicate map: password → count
     const pwCounts = {};
     data.forEach(item => { const p = item.password||''; pwCounts[p] = (pwCounts[p]||0)+1; });
-    head.innerHTML = `<tr><th>#</th><th>${tr('col.name')}</th><th>${tr('col.category')}</th><th>${tr('col.password')}</th><th>Strength</th><th>${tr('col.auto_send')}</th><th></th></tr>`;
+    head.innerHTML = `<tr><th>#</th><th>${tr('col.name')}</th><th>${tr('col.category')}</th><th>${tr('col.password')}</th><th>Strength</th><th>${tr('col.wc_len')}</th><th>${tr('col.auto_send')}</th><th>${tr('col.send_login')}</th><th>${tr('col.login')}</th><th>${tr('col.nav_mode')}</th><th>${tr('col.login_delay')}</th><th></th></tr>`;
     const strengthUpdaters = []; // array of functions to refresh each row's strength cell
     data.forEach((item, i) => {
       const row = document.createElement('tr');
@@ -477,8 +477,25 @@ function renderTable(data) {
 
       const td1 = mkTd();
       const nameInp = mkInput('cell-edit', item.name || '');
+      
+      // Wildcard passwords: disable name editing (always "random")
+      if (item.wildcard) {
+        nameInp.disabled = true;
+        nameInp.style.opacity = '0.6';
+        nameInp.title = 'Wildcard entry — name is system-managed';
+      }
+      
       nameInp.addEventListener('input', () => { data[i].name = nameInp.value; });
       td1.appendChild(nameInp);
+      
+      // Add wildcard badge for wildcard entries
+      if (item.wildcard) {
+        const wildcardBadge = document.createElement('span');
+        wildcardBadge.className = 'badge';
+        wildcardBadge.textContent = '🎲 Wildcard';
+        wildcardBadge.style.cssText = 'background:rgba(245,91,245,0.2);color:#f55bf5;margin-left:6px;';
+        td1.appendChild(wildcardBadge);
+      }
 
       const tdCat = mkTd();
       const catSelect = document.createElement('select');
@@ -491,6 +508,14 @@ function renderTable(data) {
         ['key', 'cat.key']
       ].map(([val, key]) => `<option value="${val}">${tr(key)}</option>`).join('');
       catSelect.value = item.category || '';
+      
+      // Wildcard passwords: disable category (always empty)
+      if (item.wildcard) {
+        catSelect.disabled = true;
+        catSelect.style.opacity = '0.6';
+        catSelect.title = 'Wildcard entry — category not available';
+      }
+      
       catSelect.addEventListener('change', () => { data[i].category = catSelect.value; });
       tdCat.appendChild(catSelect);
 
@@ -498,6 +523,15 @@ function renderTable(data) {
       const wrap = document.createElement('div'); wrap.className = 'pw-cell-wrap';
       const pwInp = mkInput('pw-input', item.password || '');
       pwInp.type = 'password';
+      
+      // Wildcard passwords: disable editing and hide reveal button
+      if (item.wildcard) {
+        pwInp.disabled = true;
+        pwInp.style.opacity = '0.6';
+        pwInp.style.fontStyle = 'italic';
+        pwInp.title = 'Generated on device — not exportable';
+      }
+      
       // Register updater for this row
       strengthUpdaters.push((counts) => {
         const pw   = data[i].password || '';
@@ -515,11 +549,18 @@ function renderTable(data) {
         data.forEach(item => { const p = item.password||''; updatedCounts[p] = (updatedCounts[p]||0)+1; });
         strengthUpdaters.forEach(fn => fn(updatedCounts));
       });
-      const revBtn = document.createElement('button'); revBtn.className = 'reveal-btn'; revBtn.textContent = '👁️';
-      revBtn.addEventListener('click', () => {
-        const h = pwInp.type === 'password'; pwInp.type = h ? 'text' : 'password'; revBtn.textContent = h ? '🙈' : '👁️';
-      });
-      wrap.append(pwInp, revBtn); td2.appendChild(wrap);
+      
+      // Only show reveal button for non-wildcard passwords
+      if (!item.wildcard) {
+        const revBtn = document.createElement('button'); revBtn.className = 'reveal-btn'; revBtn.textContent = '👁️';
+        revBtn.addEventListener('click', () => {
+          const h = pwInp.type === 'password'; pwInp.type = h ? 'text' : 'password'; revBtn.textContent = h ? '🙈' : '👁️';
+        });
+        wrap.append(pwInp, revBtn);
+      } else {
+        wrap.appendChild(pwInp);
+      }
+      td2.appendChild(wrap);
 
       const tdS = mkTd();
       const pw = item.password || '';
@@ -530,19 +571,139 @@ function renderTable(data) {
                      (item.name||'').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3).some(w => pw.toLowerCase().includes(w));
       tdS.innerHTML = renderLocks(strength, isDup, isPin, isName);
 
+      // Wildcard Length cell (only visible/editable for wildcard entries)
+      const tdWcLen = mkTd();
+      if (item.wildcard) {
+        const wcLenInp = document.createElement('input');
+        wcLenInp.type = 'number';
+        wcLenInp.className = 'cell-edit';
+        wcLenInp.value = item.wildcard_len || 16;
+        wcLenInp.min = '4';
+        wcLenInp.max = '64';
+        wcLenInp.style.width = '60px';
+        wcLenInp.title = 'Generated password length (4-64)';
+        wcLenInp.addEventListener('input', () => { 
+          let val = parseInt(wcLenInp.value) || 16;
+          if (val < 4) val = 4;
+          if (val > 64) val = 64;
+          data[i].wildcard_len = val;
+        });
+        tdWcLen.appendChild(wcLenInp);
+      } else {
+        tdWcLen.textContent = '—';
+        tdWcLen.style.cssText = 'color:var(--text2);opacity:0.3;text-align:center;';
+      }
+
       const tdAs = mkTd();
       const cbAs = document.createElement('input');
       cbAs.type = 'checkbox';
       cbAs.checked = item.auto_send || false;
       cbAs.title = 'Auto-send Enter after typing';
+      
+      // Wildcard passwords: disable auto_send (always false)
+      if (item.wildcard) {
+        cbAs.disabled = true;
+        cbAs.style.opacity = '0.4';
+      }
+      
       cbAs.addEventListener('change', () => { data[i].auto_send = cbAs.checked; });
       tdAs.appendChild(cbAs);
 
-      const td3 = mkTd();
-      const copyBtn = document.createElement('button'); copyBtn.className = 'copy-btn'; copyBtn.textContent = '📋';
-      copyBtn.addEventListener('click', () => {
-        navigator.clipboard.writeText((data[i].name||'') + '\t' + (data[i].password||'')).then(() => flash(copyBtn,'✅'));
+      // Send Login checkbox
+      const tdSl = mkTd();
+      const cbSl = document.createElement('input');
+      cbSl.type = 'checkbox';
+      cbSl.checked = item.send_login || false;
+      cbSl.title = 'Send login before password';
+      
+      // Wildcard passwords: disable send_login (always false)
+      if (item.wildcard) {
+        cbSl.disabled = true;
+        cbSl.style.opacity = '0.4';
+      }
+      
+      tdSl.appendChild(cbSl);
+
+      // Login text field
+      const tdLogin = mkTd();
+      const inLogin = document.createElement('input');
+      inLogin.type = 'text';
+      inLogin.value = item.login || '';
+      inLogin.placeholder = 'Login';
+      inLogin.disabled = !cbSl.checked || item.wildcard;
+      
+      // Wildcard passwords: force disabled and dim
+      if (item.wildcard) {
+        inLogin.style.opacity = '0.4';
+      }
+      
+      inLogin.addEventListener('input', () => { data[i].login = inLogin.value; });
+      tdLogin.appendChild(inLogin);
+
+      // Nav mode select
+      const tdNav = mkTd();
+      const selNav = document.createElement('select');
+      selNav.innerHTML = '<option value="enter">Enter</option><option value="tab">Tab</option>';
+      selNav.value = item.nav_mode || 'enter';
+      selNav.disabled = !cbSl.checked || item.wildcard;
+      
+      // Wildcard passwords: force disabled and dim
+      if (item.wildcard) {
+        selNav.style.opacity = '0.4';
+      }
+      
+      selNav.addEventListener('change', () => {
+        data[i].nav_mode = selNav.value;
+        inDelay.disabled = !cbSl.checked || selNav.value === 'tab';
       });
+      tdNav.appendChild(selNav);
+
+      // Login delay input
+      const tdDelay = mkTd();
+      const inDelay = document.createElement('input');
+      inDelay.type = 'number';
+      inDelay.min = '0';
+      inDelay.max = '5000';
+      inDelay.step = '50';
+      inDelay.value = item.login_delay_ms || 300;
+      inDelay.disabled = !cbSl.checked || (item.nav_mode || 'enter') === 'tab' || item.wildcard;
+      
+      // Wildcard passwords: force disabled and dim
+      if (item.wildcard) {
+        inDelay.style.opacity = '0.4';
+      }
+      
+      inDelay.addEventListener('input', () => { data[i].login_delay_ms = parseInt(inDelay.value) || 300; });
+      tdDelay.appendChild(inDelay);
+
+      // Send Login checkbox toggles disabled state of the three fields above
+      cbSl.addEventListener('change', () => {
+        data[i].send_login = cbSl.checked;
+        // Wildcard entries: always keep fields disabled
+        if (!item.wildcard) {
+          inLogin.disabled = !cbSl.checked;
+          selNav.disabled = !cbSl.checked;
+          inDelay.disabled = !cbSl.checked || selNav.value === 'tab';
+        }
+      });
+
+      const td3 = mkTd();
+      
+      // Wildcard passwords: show info text instead of copy button
+      if (item.wildcard) {
+        const wildcardNote = document.createElement('span');
+        wildcardNote.textContent = tr('wildcard.note');
+        wildcardNote.style.cssText = 'font-size:0.75rem;color:var(--text2);font-style:italic;white-space:nowrap;';
+        td3.appendChild(wildcardNote);
+      } else {
+        const copyBtn = document.createElement('button'); copyBtn.className = 'copy-btn'; copyBtn.textContent = '📋';
+        copyBtn.addEventListener('click', () => {
+          navigator.clipboard.writeText((data[i].name||'') + '\t' + (data[i].password||'')).then(() => flash(copyBtn,'✅'));
+        });
+        td3.appendChild(copyBtn);
+      }
+      
+      // Delete button available for all entries
       const delBtn = document.createElement('button'); delBtn.className = 'copy-btn'; delBtn.textContent = '🗑️'; delBtn.style.color = 'var(--danger)';
       delBtn.addEventListener('click', () => {
         if (confirm('Delete this entry?')) {
@@ -550,9 +711,9 @@ function renderTable(data) {
           renderTable(data);
         }
       });
-      td3.append(copyBtn, delBtn);
+      td3.appendChild(delBtn);
 
-      row.append(td0, td1, tdCat, td2, tdS, tdAs, td3); body.appendChild(row);
+      row.append(td0, td1, tdCat, td2, tdS, tdWcLen, tdAs, tdSl, tdLogin, tdNav, tdDelay, td3); body.appendChild(row);
     });
   } else {
     head.innerHTML = `<tr><th>#</th><th>${tr('col.name')}</th><th>${tr('col.secret')}</th><th>${tr('col.type')}</th><th>${tr('col.algorithm')}</th><th>${tr('col.digits')}</th><th>${tr('col.period')}</th><th></th></tr>`;
@@ -646,7 +807,7 @@ function renderTable(data) {
   // CSV
   document.getElementById('csvBtn').onclick = () => {
     const csv = isPasswords
-      ? 'Name,Category,Password,Auto-Send\n' + data.map(r => [r.name, r.category||'', r.password, r.auto_send ? '1' : '0'].map(q).join(',')).join('\n')
+      ? 'Name,Category,Password,Wildcard,Wildcard-Len,Auto-Send,Send-Login,Login,Nav-Mode,Login-Delay-Ms\n' + data.map(r => [r.name, r.category||'', r.password, r.wildcard ? '1' : '0', r.wildcard_len||16, r.auto_send ? '1' : '0', r.send_login ? '1' : '0', r.login||'', r.nav_mode||'enter', r.login_delay_ms||300].map(q).join(',')).join('\n')
       : 'Name,Secret,Type,Algorithm,Digits,Period,Counter\n' + data.map(r => [
           r.name, 
           r.secret, 
@@ -670,7 +831,9 @@ function renderTable(data) {
   // Add row
   document.getElementById('addRowBtn').onclick = () => {
     if (isPasswords) {
-      data.push({ name: '', password: '', category: '', auto_send: false });
+      data.push({ name: '', password: '', category: '', auto_send: false,
+        send_login: false, login: '', nav_mode: 'enter', login_delay_ms: 300,
+        wildcard: false, wildcard_len: 16 });
     } else {
       data.push({ name: '', secret: '', type: 'T', algorithm: '1', digits: 6, period: 30, counter: 0 });
     }

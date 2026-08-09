@@ -28,6 +28,7 @@ UsbHidManager usbHidManager;
 #include "web_admin_manager.h"
 #include "web_server.h"
 #include <Arduino.h>
+#include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <esp_bt.h>
 #include <esp_gap_ble_api.h>
@@ -46,6 +47,14 @@ bool shouldRestart = false;
 
 // Global flag for PIN disable request (set by web server)
 bool shouldPromptPinDisable = false;
+bool shouldPromptRemoveHiddenSpace = false;
+
+// Activity timestamp for restricted import/export mode (set by async handlers)
+unsigned long lastRestrictedModeActivity = 0;
+
+// Set by the "close session" handler in restricted mode to allow early,
+// intentional exit instead of waiting for a timeout
+bool importExportCompleted = false;
 
 // Pending theme change (set by web server, applied in main loop to avoid watchdog)
 bool pendingThemeChange = false;
@@ -144,8 +153,60 @@ void panicShutdown() {
   passwordManager.wipePasswords();
 }
 
+// --- Password Wildcard: on-device random generation + session cache ---
+// The generated value lives only in RAM for the duration of a single
+// HID "unit session" (from entering HID transmission mode for this
+// entry until a new entry/session starts). It is never persisted to
+// flash and never appears in any API response.
+static String generateWildcardPassword(int length) {
+  static const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?~";
+  const size_t charsetLen = sizeof(charset) - 1; // exclude null terminator
+  const uint8_t maxValid = (256 / charsetLen) * charsetLen; // avoid modulo bias
+  String result = "";
+  if (length < 1) length = 1;
+  if (length > 64) length = 64;
+  result.reserve(length);
+  uint8_t randomByte;
+  for (int i = 0; i < length; i++) {
+    do {
+      CryptoManager::getInstance().secureRandom(&randomByte, 1);
+    } while (randomByte >= maxValid);
+    result += charset[randomByte % charsetLen];
+  }
+  return result;
+}
+
+static String _wildcardSessionValue = "";
+static int _wildcardSessionOwnerIndex = -1;
+
+// Returns the cached value for this entry's current session, generating
+// a fresh one only if this is a different entry than last time (i.e. a
+// new session). Repeated calls for the same index return the SAME
+// value — required so password+confirm-password fields match.
+static String getWildcardSessionPassword(int index, int len) {
+  if (_wildcardSessionOwnerIndex != index) {
+    // Zero the previous cached value in place before it is discarded,
+    // so the old heap buffer is never freed while still containing
+    // a password (String::operator= frees the old buffer but does
+    // not memset it).
+    secureWipeString(_wildcardSessionValue);
+    _wildcardSessionValue = generateWildcardPassword(len);
+    _wildcardSessionOwnerIndex = index;
+  }
+  return _wildcardSessionValue;
+}
+
+// Wipes the cached session value from RAM. Called on secure shutdown
+// and whenever a new HID session is about to start (forcing the next
+// getWildcardSessionPassword() call to generate fresh).
+static void wipeWildcardSession() {
+  secureWipeString(_wildcardSessionValue);
+  _wildcardSessionOwnerIndex = -1;
+}
+
 void secureShutdown() {
   LOG_INFO("Main", "Secure shutdown: wiping sensitive data...");
+  wipeWildcardSession();
   CryptoManager::getInstance().wipeDeviceKey();
   keyManager.wipeSecrets();
   passwordManager.wipePasswords();
@@ -154,6 +215,20 @@ void secureShutdown() {
 #endif
   delay(50);
   LOG_INFO("Main", "Secure shutdown: entering deep sleep");
+}
+
+void secureRestart() {
+  LOG_INFO("Main", "Secure restart: wiping sensitive data...");
+  wipeWildcardSession();
+  CryptoManager::getInstance().wipeDeviceKey();
+  keyManager.wipeSecrets();
+  passwordManager.wipePasswords();
+#ifdef SECURE_LAYER_ENABLED
+  secureLayerManager.wipeAllSessions();
+#endif
+  delay(50);
+  LOG_INFO("Main", "Secure restart: restarting device");
+  ESP.restart();
 }
 
 // PIN attempt counter persistence functions
@@ -189,6 +264,19 @@ void clearPinAttempts() { LittleFS.remove(PIN_ATTEMPTS_FILE); }
 
 void runHiddenSpaceSetupFlow() {
   LOG_INFO("Main", "Starting secondary slot setup flow");
+
+  // Hidden Space requires the startup PIN to be enabled — its dual-slot
+  // format is built on top of an existing PIN-encrypted device key file.
+  // Creating it on an unencrypted (plaintext) key file corrupts the file.
+  if (!CryptoManager::getInstance().isDeviceKeyEncrypted()) {
+    LOG_WARNING("Main", "Hidden Space setup blocked: Startup PIN is not enabled");
+    displayManager.init();
+    displayManager.showMessage("Cannot Create", 10, 20, true, 2);
+    displayManager.showMessage("Hidden Space", 10, 45, true, 2);
+    displayManager.showMessage("Enable Startup PIN first", 10, 70, false, 1);
+    delay(3000);
+    return;
+  }
   
   // Load PIN length preference before any PIN entry
   // pinManager.begin() is not called yet, but loadPinConfig() alone
@@ -215,7 +303,8 @@ void runHiddenSpaceSetupFlow() {
     displayManager.init();
     displayManager.showMessage("Setup Cancelled", 10, 30, true, 2);
     delay(2000);
-    ESP.restart();
+    secureWipeString(spaceAPin);
+    secureRestart();
     return;
   }
   
@@ -224,7 +313,8 @@ void runHiddenSpaceSetupFlow() {
     displayManager.init();
     displayManager.showMessage("Wrong PIN", 10, 30, true, 2);
     delay(2000);
-    ESP.restart();
+    secureWipeString(spaceAPin);
+    secureRestart();
     return;
   }
   
@@ -253,7 +343,9 @@ void runHiddenSpaceSetupFlow() {
       displayManager.init();
       displayManager.showMessage("Setup Cancelled", 10, 30, true, 2);
       delay(2000);
-      ESP.restart();
+      secureWipeString(spaceAPin);
+      secureWipeString(newPin);
+      secureRestart();
       return;
     }
     
@@ -375,7 +467,10 @@ void runHiddenSpaceSetupFlow() {
       displayManager.showMessage("Secondary Slot Ready", 10, 30, true, 2);
       displayManager.showMessage("Rebooting...", 10, 60, false, 1);
       delay(2000);
-      ESP.restart();
+      secureWipeString(spaceAPin);
+      secureWipeString(newPin);
+      secureWipeString(confirmPin);
+      secureRestart();
       return; // Never reached
     } else {
       LOG_ERROR("Main", "Failed to create secondary slot");
@@ -386,6 +481,238 @@ void runHiddenSpaceSetupFlow() {
       // Loop back to try again
     }
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// IMPORT/EXPORT RESTRICTED MODE
+// ═══════════════════════════════════════════════════════════════════════════
+
+void runImportExportRestrictedMode() {
+  LOG_INFO("Main", "Entering Import/Export restricted mode");
+  
+  // TOTP keys are held in KeyManager's internal vector, populated only
+  // by begin()/loadKeys(). Normal boot calls keyManager.begin() in Phase 5,
+  // which restricted mode branches off before reaching — without this call
+  // exportKeysEncryptedRestricted() reads an empty, never-loaded vector
+  // and silently produces a valid-looking but empty export file.
+  // PasswordManager needs no equivalent call: getAllPasswordsForExport()
+  // and replaceAllPasswords() both re-read/re-write disk directly,
+  // independent of any internal vector state (confirmed by source review).
+  keyManager.begin();
+  
+  // Generate a fresh AP password via the hardware-backed CTR_DRBG.
+  // Never persisted to config.json, never reused across entries.
+  auto generateRandomApPassword = []() -> String {
+    const char alphabet[] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no ambiguous chars
+    const int pwLen = 10;
+    uint8_t randomBytes[pwLen];
+    CryptoManager::getInstance().secureRandom(randomBytes, pwLen);
+    String password;
+    password.reserve(pwLen);
+    for (int i = 0; i < pwLen; i++) {
+      password += alphabet[randomBytes[i] % (sizeof(alphabet) - 1)];
+    }
+    return password;
+  };
+  
+  String apName = "ESP32-IMPEXP-" + String((uint32_t)(esp_random() & 0xFFFF), HEX);
+  String apPassword = generateRandomApPassword();
+  
+  WiFi.mode(WIFI_AP);
+  bool apOk = WiFi.softAP(apName.c_str(), apPassword.c_str());
+  if (!apOk) {
+    LOG_ERROR("Main", "Failed to start restricted-mode AP");
+    ESP.restart();
+    return;
+  }
+
+  DNSServer restrictedDnsServer;
+  restrictedDnsServer.start(53, "*", WiFi.softAPIP());
+  LOG_INFO("Main", "DNS Server started for restricted mode captive portal");
+  
+  // Display screen — pattern copied from the ordinary Admin AP info screen.
+  // IMPORTANT: apPassword must never be written to LOG_INFO/LOG_DEBUG etc.
+  // It is only ever shown on-device, never logged, never persisted.
+  auto drawRestrictedModeScreen = [&]() {
+    TFT_eSPI *tft = displayManager.getTft();
+    auto *t = displayManager.getCurrentThemeColors();
+    int W = tft->width();
+    int H = tft->height();
+    int cx = W / 2;
+    
+    tft->fillScreen(t->background_dark);
+    tft->setTextDatum(MC_DATUM);
+    
+    tft->setTextSize(2);
+    tft->setTextColor(t->accent_primary, t->background_dark);
+    tft->drawString("Import/Export Mode", cx, 18);
+    
+    tft->drawFastHLine(20, 32, W - 40, t->text_secondary);
+    
+    tft->setTextSize(1);
+    tft->setTextColor(t->text_secondary, t->background_dark);
+    tft->drawString("Network", cx, 44);
+    tft->setTextColor(t->text_primary, t->background_dark);
+    tft->drawString(apName, cx, 56);
+    
+    tft->setTextColor(t->text_secondary, t->background_dark);
+    tft->drawString("Password: " + apPassword +
+                        "   IP: " + WiFi.softAPIP().toString(),
+                    cx, 70);
+    
+    tft->setTextColor(t->text_secondary, t->background_dark);
+    tft->drawString("Session ends automatically", cx, H - 20);
+    
+    // Button hints — match AP screen style
+#ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+    int btnL = (W - 224) / 2;
+#else
+    int btnL = 8;
+#endif
+    int btnR = btnL + 118;
+    tft->fillRoundRect(btnL, H - 52, 106, 22, 6, t->background_light);
+    tft->setTextColor(t->text_primary, t->background_light);
+    tft->drawString("BTN1: WiFi QR", btnL + 53, H - 41);
+    
+    tft->fillRoundRect(btnR, H - 52, 106, 22, 6, t->accent_primary);
+    tft->setTextColor(t->background_dark, t->accent_primary);
+    tft->drawString("BTN2: Exit", btnR + 53, H - 41);
+  };
+  drawRestrictedModeScreen();
+  
+  auto highlightButtonRestricted = [&](int activeBtn) {
+    TFT_eSPI *tft = displayManager.getTft();
+    auto *t = displayManager.getCurrentThemeColors();
+    int W = tft->width();
+    int H = tft->height();
+#ifdef ARDUINO_LILYGO_T_DISPLAY_S3
+    int btnL = (W - 224) / 2;
+#else
+    int btnL = 8;
+#endif
+    int btnR = btnL + 118;
+    if (activeBtn == 1) {
+      tft->fillRoundRect(btnL, H - 52, 106, 22, 6, t->accent_primary);
+      tft->setTextDatum(MC_DATUM);
+      tft->setTextColor(t->background_dark, t->accent_primary);
+      tft->drawString("BTN1: WiFi QR", btnL + 53, H - 41);
+      tft->fillRoundRect(btnR, H - 52, 106, 22, 6, t->background_light);
+      tft->setTextColor(t->text_primary, t->background_light);
+      tft->drawString("BTN2: Exit", btnR + 53, H - 41);
+    } else {
+      tft->fillRoundRect(btnL, H - 52, 106, 22, 6, t->background_light);
+      tft->setTextDatum(MC_DATUM);
+      tft->setTextColor(t->text_primary, t->background_light);
+      tft->drawString("BTN1: WiFi QR", btnL + 53, H - 41);
+      tft->fillRoundRect(btnR, H - 52, 106, 22, 6, t->accent_primary);
+      tft->setTextColor(t->background_dark, t->accent_primary);
+      tft->drawString("BTN2: Exit", btnR + 53, H - 41);
+    }
+  };
+  
+  webServerManager.startRestrictedImportExportServer();
+  
+  const unsigned long ROLLING_TIMEOUT = 10UL * 60 * 1000; // 10 min inactivity
+  const unsigned long HARD_CAP        = 30UL * 60 * 1000; // 30 min absolute cap
+  
+  unsigned long startTime = millis();
+  lastRestrictedModeActivity = millis();
+  importExportCompleted = false;
+  
+  bool inQrMode = false;
+  unsigned long qrStartTime = 0;
+  int lastQrSecond = 30;
+  String wifiQR = "WIFI:S:" + apName + ";T:WPA;P:" + apPassword + ";H:false;;";
+  
+  while (true) {
+    esp_task_wdt_reset();
+    restrictedDnsServer.processNextRequest();
+    
+    if (importExportCompleted) {
+      LOG_INFO("Main", "Restricted mode: session closed by user");
+      break;
+    }
+    if (millis() - lastRestrictedModeActivity > ROLLING_TIMEOUT) {
+      LOG_INFO("Main", "Restricted mode: timeout - no activity");
+      break;
+    }
+    if (millis() - startTime > HARD_CAP) {
+      LOG_INFO("Main", "Restricted mode: hard cap reached");
+      break;
+    }
+    
+    if (inQrMode) {
+      unsigned long now = millis();
+      long elapsedMs = (long)(now - qrStartTime);
+      long qrSecondsLeft = (30000L - elapsedMs) / 1000L;
+      
+      if (qrSecondsLeft <= 0) {
+        // Auto-revert: QR window expired, return to main screen
+        // without requiring a button press.
+        displayManager.hideQRCode();
+        inQrMode = false;
+        drawRestrictedModeScreen();
+        lastRestrictedModeActivity = millis();
+        delay(50);
+        continue;
+      }
+      
+      if (qrSecondsLeft != lastQrSecond) {
+        lastQrSecond = (int)qrSecondsLeft;
+        displayManager.updateQRTimer((int)qrSecondsLeft);
+      }
+      
+      if (readBtn1() || readBtn2()) {
+        while (readBtn1() || readBtn2()) {
+          esp_task_wdt_reset();
+          delay(10);
+        }
+        displayManager.hideQRCode();
+        inQrMode = false;
+        drawRestrictedModeScreen();
+        lastRestrictedModeActivity = millis();
+      }
+      delay(50);
+      continue;
+    }
+    
+    if (readBtn1()) {
+      highlightButtonRestricted(1);
+      while (readBtn1()) {
+        esp_task_wdt_reset();
+        delay(10);
+      }
+      delay(30);
+      LOG_INFO("Main", "Restricted mode: showing WiFi QR");
+      displayManager.showQRCode(wifiQR, 30);
+      qrStartTime = millis();
+      lastQrSecond = 30;
+      inQrMode = true;
+      lastRestrictedModeActivity = millis();
+      continue;
+    }
+    
+    if (readBtn2()) {
+      highlightButtonRestricted(2);
+      while (readBtn2()) {
+        esp_task_wdt_reset();
+        delay(10);
+      }
+      delay(30);
+      LOG_INFO("Main", "Restricted mode: exit via BTN2");
+      importExportCompleted = true;
+      continue;
+    }
+    
+    delay(100);
+  }
+  
+  LOG_INFO("Main", "Exiting Import/Export restricted mode");
+  delay(500); // let any in-flight HTTP response finish sending before AP teardown
+  secureWipeString(apPassword);
+  secureWipeString(wifiQR);
+  WiFi.softAPdisconnect(true);
+  ESP.restart();
 }
 
 // Глобальные переменные состояния
@@ -527,6 +854,7 @@ void handleFactoryResetOnBoot() {
       LittleFS.remove("/hid_mode.json"); // <-- СБРОС HID MODE PREF
       LittleFS.remove("/boot_mode.json"); // <-- СБРОС BOOT MODE PREF
       LittleFS.remove("/.setup_hidden_space"); // <-- СБРОС Hidden Space Setup Flag
+      LittleFS.remove("/.setup_import_export"); // <-- СБРОС Import/Export Restricted Mode Flag
 
       // 🔗 URL Obfuscation: Удаление boot counter и всех mappings
       LOG_INFO("Main", "Clearing URL obfuscation data...");
@@ -568,13 +896,10 @@ void handleFactoryResetOnBoot() {
       LOG_INFO("Main", "LittleFS formatted - all files removed");
       
       // ═══ SECURE MEMORY ZEROING ═══
-      LOG_INFO("Main", "Wiping device key from memory...");
-      CryptoManager::getInstance().wipeDeviceKey();
-
       displayManager.showMessage("Done. Rebooting...", 10, 60);
 
       delay(2500);
-      ESP.restart();
+      secureRestart();
     }
 
     int progress = (holdTime * 100) / factoryResetHoldTime;
@@ -746,6 +1071,30 @@ void setup() {
     ActiveSpace activeSpace = CryptoManager::getInstance().getActiveSpace();
     LOG_INFO("BOOT", "Active space: " + String(activeSpace == ActiveSpace::A ? "A" : 
                                                 activeSpace == ActiveSpace::B ? "B" : "NONE"));
+
+    // ═══ CHECK FOR IMPORT/EXPORT RESTRICTED MODE FLAG ═══
+    // Only reached after successful PIN unlock (not first-boot, not legacy,
+    // not lockout) — _activeSpace and DRBG are guaranteed initialized here.
+    if (LittleFS.exists("/.setup_import_export")) {
+      File flagFile = LittleFS.open("/.setup_import_export", "r");
+      String requestedSpace = flagFile ? flagFile.readString() : "";
+      if (flagFile) flagFile.close();
+      requestedSpace.trim();
+
+      ActiveSpace currentSpaceCheck = CryptoManager::getInstance().getActiveSpace();
+      String currentSpaceStr = (currentSpaceCheck == ActiveSpace::B) ? "B" : "A";
+
+      if (requestedSpace == currentSpaceStr) {
+        LOG_INFO("Main", "Import/Export restricted mode flag detected for active space " + currentSpaceStr);
+        LittleFS.remove("/.setup_import_export");
+        runImportExportRestrictedMode();
+        // does not return — reboots on completion
+      } else {
+        LOG_INFO("Main", "Import/Export flag exists for space " + requestedSpace +
+                          " but active space is " + currentSpaceStr +
+                          " — skipping, flag left intact for its own space's next unlock");
+      }
+    }
 
   } else {
     // LEGACY: device.key существует но не зашифрован (старый формат)
@@ -1449,7 +1798,7 @@ void handleButtons() {
 
     // HOTP generation: both buttons held 1 second in TOTP mode
     if (currentMode == AppMode::TOTP) {
-      auto keys = keyManager.getAllKeys();
+      const auto& keys = keyManager.getAllKeys();
       if (!keys.empty() && keys[currentKeyIndex].type == TOTPType::HOTP) {
         if (bothButtonsPressStartTime == 0) {
           bothButtonsPressStartTime = millis();
@@ -1502,6 +1851,7 @@ void handleButtons() {
                 displayManager.hideLoader();
               } else {
                 bool useBle = displayManager.drawHidPrompt(defaultHidIsBle);
+                wipeWildcardSession(); // force fresh generation for this HID session
                 if (useBle) {
                   currentMode = AppMode::BLE_ADVERTISING;
                   LOG_INFO("Main", "HID prompt: BLE selected");
@@ -1512,6 +1862,7 @@ void handleButtons() {
               }
             }
 #else
+            wipeWildcardSession(); // force fresh generation for this HID session
             currentMode = AppMode::BLE_ADVERTISING;
             LOG_INFO("Main", "Both buttons held. Switching to BLE_ADVERTISING mode");
 #endif
@@ -1598,7 +1949,7 @@ void handleButtons() {
       if (millis() - button1PressStartTime < powerOffHoldTime) {
         LOG_DEBUG("Main", "Button 1 press: Previous item");
         if (currentMode == AppMode::TOTP) {
-          auto keys = keyManager.getAllKeys();
+          const auto& keys = keyManager.getAllKeys();
           if (!keys.empty()) {
             currentKeyIndex =
                 (currentKeyIndex == 0) ? keys.size() - 1 : currentKeyIndex - 1;
@@ -1606,7 +1957,7 @@ void handleButtons() {
             buttonPressed = true;
           }
         } else if (currentMode == AppMode::PASSWORD) {
-          auto passwords = passwordManager.getAllPasswords();
+          const auto& passwords = passwordManager.getAllPasswords();
           if (!passwords.empty()) {
             currentPasswordIndex = (currentPasswordIndex == 0)
                                        ? passwords.size() - 1
@@ -1649,14 +2000,14 @@ void handleButtons() {
       if (millis() - button2PressStartTime < powerOffHoldTime) {
         LOG_DEBUG("Main", "Button 2 press: Next item");
         if (currentMode == AppMode::TOTP) {
-          auto keys = keyManager.getAllKeys();
+          const auto& keys = keyManager.getAllKeys();
           if (!keys.empty()) {
             currentKeyIndex = (currentKeyIndex + 1) % keys.size();
             displayManager.setKeySwitched(true); // <-- ADDED
             buttonPressed = true;
           }
         } else if (currentMode == AppMode::PASSWORD) {
-          auto passwords = passwordManager.getAllPasswords();
+          const auto& passwords = passwordManager.getAllPasswords();
           if (!passwords.empty()) {
             currentPasswordIndex =
                 (currentPasswordIndex + 1) % passwords.size();
@@ -1864,21 +2215,17 @@ void loop() {
       displayManager.init();
       displayManager.showMessage("Disabling PIN...", 10, 30, false, 2);
 
-      // If secondary slot exists, wipe it before removing PIN protection
+      // Startup PIN cannot be disabled while Hidden Space exists — it must
+      // be explicitly removed first (requires Space B's own PIN).
       if (CryptoManager::getInstance().isHiddenSpaceProvisioned()) {
-        LOG_INFO("Main", "Disabling startup PIN: wiping secondary slot first");
-        displayManager.showMessage("Wiping secondary slot...", 10, 50, false, 1);
-        
-        if (!CryptoManager::getInstance().wipeHiddenSpace()) {
-          LOG_ERROR("Main", "Failed to wipe secondary slot before PIN removal");
-          displayManager.init();
-          displayManager.showMessage("ERROR!", 10, 30, true, 2);
-          displayManager.showMessage("Secondary slot wipe failed", 10, 60, false, 1);
-          delay(3000);
-          displayManager.init();
-          return;
-        }
-        LOG_INFO("Main", "Secondary slot wiped before PIN removal");
+        LOG_WARNING("Main", "PIN disable blocked: Hidden Space is still provisioned");
+        displayManager.init();
+        displayManager.showMessage("Cannot Disable PIN", 10, 20, true, 2);
+        displayManager.showMessage("Hidden Space active", 10, 45, false, 1);
+        displayManager.showMessage("Remove it first", 10, 65, false, 1);
+        delay(3000);
+        displayManager.init();
+        return;
       }
 
       if (CryptoManager::getInstance().disablePinEncryption(enteredPin)) {
@@ -1890,7 +2237,7 @@ void loop() {
         delay(2000);
 
         // Перезагружаемся
-        ESP.restart();
+        secureRestart();
       } else {
         LOG_ERROR("Main", "Failed to disable PIN - wrong PIN");
 
@@ -1910,9 +2257,50 @@ void loop() {
     displayManager.init(); // Возвращаемся к нормальному экрану
   }
 
+  if (shouldPromptRemoveHiddenSpace) {
+    shouldPromptRemoveHiddenSpace = false;
+
+    LOG_INFO("Main", "Hidden Space removal request detected - prompting on device");
+
+    if (!isScreenOn) {
+      displayManager.turnOn();
+      isScreenOn = true;
+    }
+
+    displayManager.init();
+    displayManager.showMessage("Web Request:", 10, 20, false, 2);
+    displayManager.showMessage("Remove Hidden Space?", 10, 40, false, 2);
+    displayManager.showMessage("Enter Space B PIN", 10, 70, false, 1);
+    delay(2000);
+
+    String spaceBPin = pinManager.requestPinInput("Confirm Space B PIN");
+
+    if (spaceBPin.length() > 0) {
+      displayManager.init();
+      displayManager.showMessage("Removing...", 10, 30, false, 2);
+
+      if (CryptoManager::getInstance().removeHiddenSpaceWithPin(spaceBPin)) {
+        LOG_INFO("Main", "Hidden Space removed via device confirmation");
+        displayManager.init();
+        displayManager.showMessage("Hidden Space", 10, 20, false, 2);
+        displayManager.showMessage("Removed!", 10, 45, false, 2);
+        displayManager.showMessage("Rebooting...", 10, 70, false, 1);
+        delay(2000);
+        secureRestart();
+      } else {
+        LOG_ERROR("Main", "Failed to remove Hidden Space - wrong PIN");
+        displayManager.init();
+        displayManager.showMessage("Wrong PIN!", 10, 30, true, 2);
+        displayManager.showMessage("Try again via web", 10, 60, false, 1);
+        delay(3000);
+      }
+    } else {
+      LOG_INFO("Main", "Hidden Space removal cancelled by user");
+    }
+  }
+
   // Проверяем таймаут API веб-сервера и самого сервера
   if (webServerManager.isRunning()) {
-    WebAdminManager::getInstance().checkApiTimeout();
     webServerManager.update();
 
     // Process DNS for Admin AP mode
@@ -1946,7 +2334,7 @@ void loop() {
 
       // Now do all heavy work from stable main loop context
       keyManager.getKeyRef(hotpSaveIndex).counter++;
-      auto updatedKeys = keyManager.getAllKeys();
+      const auto& updatedKeys = keyManager.getAllKeys();
       String newCode = totpGenerator.generateCode(updatedKeys[hotpSaveIndex]);
       displayManager.updateTOTPCode(newCode, -1);
       displayManager.eraseLoaderArea();
@@ -2173,7 +2561,7 @@ void loop() {
 
     switch (currentMode) {
     case AppMode::TOTP: {
-      auto keys = keyManager.getAllKeys();
+      const auto& keys = keyManager.getAllKeys();
       if (!keys.empty()) {
         if (currentKeyIndex != previousKeyIndex) {
           displayManager.drawLayout(
@@ -2238,10 +2626,10 @@ void loop() {
       break;
     }
     case AppMode::PASSWORD: {
-      auto passwords = passwordManager.getAllPasswords();
+      const auto& passwords = passwordManager.getAllPasswords();
       if (!passwords.empty()) {
         uint32_t pwRevision = passwordManager.getRevision();
-        if (currentPasswordIndex != previousPasswordIndex || pwRevision != previousPwRevision) {
+        if (currentPasswordIndex != previousPasswordIndex || pwRevision != previousPwRevision || displayManager.consumePasswordRedrawFlag()) {
           previousPwRevision = pwRevision;
           auto& curPwd = passwords[currentPasswordIndex];
           // Check for duplicate pw_hash among all entries
@@ -2298,7 +2686,10 @@ void loop() {
               isDup,
               isPin,
               isName,
-              curPwd.auto_send);
+              curPwd.getAutoSend(),
+              curPwd.getSendLogin(),
+              curPwd.nav_mode,
+              curPwd.getWildcard());
           previousPasswordIndex = currentPasswordIndex;
         }
       } else {
@@ -2470,7 +2861,7 @@ void loop() {
     case AppMode::BLE_CONFIRM_SEND: {
       static bool confirmPageDrawn = false;
 
-      auto passwords = passwordManager.getAllPasswords();
+      const auto& passwords = passwordManager.getAllPasswords();
       if (passwords.empty() || currentPasswordIndex >= (int)passwords.size()) {
         // Safety check
         currentMode = AppMode::PASSWORD;
@@ -2487,13 +2878,19 @@ void loop() {
         String passwordName = passwords[currentPasswordIndex].name;
         String password = passwords[currentPasswordIndex].password;
         String deviceName = bleKeyboardManager.getDeviceName();
-        displayManager.drawBleConfirmPage(passwordName, password, deviceName);
+        displayManager.drawBleConfirmPage(
+            passwordName, 
+            password, 
+            deviceName,
+            passwords[currentPasswordIndex].login,
+            passwords[currentPasswordIndex].getSendLogin()
+        );
         confirmPageDrawn = true;
         previousPasswordIndex = currentPasswordIndex;
 
         // Автоотправка без нажатия кнопки
         if (currentPasswordIndex >= 0 && !autoSendDone) {
-          if (passwords[currentPasswordIndex].auto_send) {
+          if (passwords[currentPasswordIndex].getAutoSend()) {
             LOG_INFO("Main", "Auto-send: triggering without button press");
             autoSendTriggered = true;
           }
@@ -2515,10 +2912,29 @@ void loop() {
         if (!autoSendTriggered) delay(200); // Only delay for physical button
         LOG_INFO("Main", autoSendTriggered ? "Auto-sending data" : "Send button pressed. Sending data");
 
-        displayManager.drawBleSendingPage();
-        String password = passwords[currentPasswordIndex].password;
+        displayManager.drawBleSendingPage(
+            passwords[currentPasswordIndex].name,
+            passwords[currentPasswordIndex].login,
+            passwords[currentPasswordIndex].getSendLogin()
+        );
+        String password = passwords[currentPasswordIndex].getWildcard()
+            ? getWildcardSessionPassword(currentPasswordIndex, passwords[currentPasswordIndex].wildcard_len)
+            : passwords[currentPasswordIndex].password;
+        if (passwords[currentPasswordIndex].getSendLogin() &&
+            passwords[currentPasswordIndex].login.length() > 0) {
+          bleKeyboardManager.sendPassword(passwords[currentPasswordIndex].login.c_str());
+          if (passwords[currentPasswordIndex].nav_mode == "tab") {
+            bleKeyboardManager.sendTab();
+          } else {
+            bleKeyboardManager.sendEnter();
+          }
+          delay(100);
+        }
         bleKeyboardManager.sendPassword(password.c_str());
-        if (passwords[currentPasswordIndex].auto_send) {
+        // Wipe the local wildcard/plaintext password copy now that it
+        // has been transmitted — sendPassword() has already read it.
+        secureWipeString(password);
+        if (passwords[currentPasswordIndex].getAutoSend()) {
           bleKeyboardManager.sendEnter();
         }
         delay(500); // Give time for the UI and BLE
@@ -2541,7 +2957,7 @@ void loop() {
       static bool usbPageDrawn = false;
       static String lastUsbStatusDrawn = "";
       
-      auto passwords = passwordManager.getAllPasswords();
+      const auto& passwords = passwordManager.getAllPasswords();
       if (passwords.empty() || currentPasswordIndex >= (int)passwords.size()) {
         currentMode = AppMode::PASSWORD;
         bleActionTriggered = false;
@@ -2569,7 +2985,12 @@ void loop() {
         pendingUsbStatusSince = millis();
       }
       if (usbStatus != lastUsbStatusDrawn && millis() - pendingUsbStatusSince >= 300) {
-        displayManager.drawUsbHidPage(passwordName, usbStatus);
+        displayManager.drawUsbHidPage(
+            passwordName, 
+            usbStatus,
+            passwords[currentPasswordIndex].login,
+            passwords[currentPasswordIndex].getSendLogin()
+        );
         lastUsbStatusDrawn = usbStatus;
       }
 
@@ -2577,10 +2998,30 @@ void loop() {
       if (readBtn2()) {
         delay(50);
         if (readBtn2()) {
-          String password = passwords[currentPasswordIndex].password;
-          displayManager.drawUsbHidPage(passwordName, "Sending...");
+          String password = passwords[currentPasswordIndex].getWildcard()
+              ? getWildcardSessionPassword(currentPasswordIndex, passwords[currentPasswordIndex].wildcard_len)
+              : passwords[currentPasswordIndex].password;
+          displayManager.drawUsbHidPage(
+              passwordName, 
+              "Sending...",
+              passwords[currentPasswordIndex].login,
+              passwords[currentPasswordIndex].getSendLogin()
+          );
+          if (passwords[currentPasswordIndex].getSendLogin() &&
+              passwords[currentPasswordIndex].login.length() > 0) {
+            usbHidManager.sendPassword(passwords[currentPasswordIndex].login.c_str());
+            if (passwords[currentPasswordIndex].nav_mode == "tab") {
+              usbHidManager.sendTab();
+            } else {
+              usbHidManager.sendEnter();
+            }
+            delay(100);
+          }
           usbHidManager.sendPassword(password.c_str());
-          if (passwords[currentPasswordIndex].auto_send) {
+          // Wipe the local wildcard/plaintext password copy now that it
+          // has been transmitted — sendPassword() has already read it.
+          secureWipeString(password);
+          if (passwords[currentPasswordIndex].getAutoSend()) {
             usbHidManager.sendEnter();
           }
           delay(500);
@@ -2619,6 +3060,6 @@ void loop() {
   if (shouldRestart) {
     LOG_INFO("Main", "Device restart requested. Restarting in 1 second...");
     delay(1000);
-    ESP.restart();
+    secureRestart();
   }
 }

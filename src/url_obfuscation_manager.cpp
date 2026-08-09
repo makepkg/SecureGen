@@ -40,16 +40,12 @@ bool URLObfuscationManager::begin() {
     registerCriticalEndpoint("/api/show_qr", "QR Code Display");
     registerCriticalEndpoint("/api/hotp/generate", "HOTP Code Generation");
     registerCriticalEndpoint("/api/keys/reorder", "TOTP Keys Reordering");
-    registerCriticalEndpoint("/api/export", "TOTP Keys Export");
-    registerCriticalEndpoint("/api/import", "TOTP Keys Import");
     registerCriticalEndpoint("/api/passwords", "All Passwords List");
     registerCriticalEndpoint("/api/passwords/add", "Password Addition");
     registerCriticalEndpoint("/api/passwords/delete", "Password Deletion");
     registerCriticalEndpoint("/api/passwords/update", "Password Update");
     registerCriticalEndpoint("/api/passwords/get", "Password Retrieval");
     registerCriticalEndpoint("/api/passwords/reorder", "Password Reordering");
-    registerCriticalEndpoint("/api/passwords/export", "Password Export");
-    registerCriticalEndpoint("/api/passwords/import", "Password Import");
     registerCriticalEndpoint("/api/config", "Server Configuration");
     registerCriticalEndpoint("/api/pincode_settings", "PIN Security Settings");
     registerCriticalEndpoint("/api/change_password", "Web Cabinet Password Change");
@@ -57,8 +53,6 @@ bool URLObfuscationManager::begin() {
     registerCriticalEndpoint("/api/wifi_credentials", "WiFi Credentials Update");
     registerCriticalEndpoint("/api/session_duration", "Session Duration Settings");
     registerCriticalEndpoint("/api/activity", "Activity Timer Reset");
-    registerCriticalEndpoint("/api/enable_import_export", "API Access Control");
-    registerCriticalEndpoint("/api/import_export_status", "API Access Status");
     registerCriticalEndpoint("/api/theme", "Display Theme");
     registerCriticalEndpoint("/api/display_settings", "Display Settings");
     registerCriticalEndpoint("/api/display/rotation", "Display Rotation");
@@ -72,6 +66,7 @@ bool URLObfuscationManager::begin() {
     registerCriticalEndpoint("/api/duress_pin_update", "duress_pin_update");
     registerCriticalEndpoint("/api/ble_pin_update", "BLE PIN Update");
     registerCriticalEndpoint("/api/clear_ble_clients", "Clear BLE Clients");
+    registerCriticalEndpoint("/api/enter_import_export_mode", "Enter Import/Export Mode");
     registerCriticalEndpoint("/api/ble_settings", "BLE Device Settings");
     registerCriticalEndpoint("/api/mdns_settings", "mDNS Settings");
     registerCriticalEndpoint("/api/startup_mode", "Startup Mode");

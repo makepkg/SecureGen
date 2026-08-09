@@ -6,7 +6,8 @@
 #include "WiFi.h"
 #include "totp_generator.h"
 #include "crypto_manager.h"
-#include "web_admin_manager.h" 
+#include "web_admin_manager.h"
+#include "secure_utils.h" 
 #include "web_pages/page_login.h"
 #include <nvs_flash.h>  // Для очистки NVS partition при factory reset
 #ifdef DEBUG_BUILD
@@ -19,6 +20,7 @@
 #include "ble_keyboard_manager.h"
 #include "rtc_manager.h"
 extern RTCManager rtcManager;
+extern void secureRestart();
 
 #ifdef SECURE_LAYER_ENABLED
 #include "web_server_secure_integration.h"
@@ -907,8 +909,6 @@ void WebServerManager::start() {
                 '/api/passwords/delete',
                 '/api/passwords/update',
                 '/api/passwords/reorder',
-                '/api/passwords/export',
-                '/api/passwords/import',
                 '/api/pincode_settings' // PIN settings (security configuration)
             ];
             return tunneledEndpoints.includes(endpoint);
@@ -1143,7 +1143,7 @@ void WebServerManager::start() {
             JsonDocument doc;
             JsonArray keysArray = doc.to<JsonArray>();
             
-            auto keys = keyManager.getAllKeys();
+            const auto& keys = keyManager.getAllKeys();
             
             // 🔐 Блокировка TOTP в AP/Offline режимах
             bool blockTOTP = !totpGenerator.isTimeSynced();
@@ -1482,9 +1482,6 @@ void WebServerManager::start() {
     
     auto showQrBodyHandler = [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
         if (index + len == total) {
-            // 🐛 DEBUG: Log raw body first
-            LOG_DEBUG("WebServer", "SHOW_QR body: " + String(len) + " bytes: " + String((char*)data, len));
-            
             // 1. Аутентификация и CSRF проверка
             if (!isAuthenticated(request)) return request->send(401, "application/json", "{\"error\":\"Unauthorized\"}");
             if (!verifyCsrfToken(request)) return request->send(403, "application/json", "{\"error\":\"CSRF token mismatch\"}");
@@ -1503,7 +1500,7 @@ void WebServerManager::start() {
                 String decryptedBody;
                 
                 if (secureLayer.decryptRequest(clientId, encryptedBody, decryptedBody)) {
-                    LOG_DEBUG("WebServer", "🔐 Decrypted show_qr body: " + decryptedBody);
+                    LOG_DEBUG("WebServer", "🔐 show_qr requested");
                     
                     // Парсим расшифрованные данные (формат: key_id=0)
                     int keyIdStart = decryptedBody.indexOf("key_id=");
@@ -1538,7 +1535,7 @@ void WebServerManager::start() {
             }
             
             // 4. Получить ключ из KeyManager
-            auto keys = keyManager.getAllKeys();
+            const auto& keys = keyManager.getAllKeys();
             if (keyIndex < 0 || keyIndex >= keys.size()) {
                 LOG_ERROR("WebServer", "SHOW_QR: Invalid key index: " + String(keyIndex));
                 return request->send(404, "application/json", "{\"error\":\"Key not found\"}");
@@ -1679,7 +1676,7 @@ void WebServerManager::start() {
                 String decryptedBody;
                 
                 if (secureLayer.decryptRequest(clientId, encryptedBody, decryptedBody)) {
-                    LOG_DEBUG("WebServer", "🔐 Decrypted key remove body: " + decryptedBody);
+                    LOG_DEBUG("WebServer", "🔐 key remove requested");
                     
                     // Парсим расшифрованные данные (формат: index=0)
                     int indexStart = decryptedBody.indexOf("index=");
@@ -1762,7 +1759,7 @@ void WebServerManager::start() {
                 String decryptedBody;
                 
                 if (secureLayer.decryptRequest(clientId, encryptedBody, decryptedBody)) {
-                    LOG_DEBUG("WebServer", "🔐 Decrypted HOTP generate body: " + decryptedBody);
+                    LOG_DEBUG("WebServer", "🔐 HOTP generate requested");
                     
                     // Парсим расшифрованные данные (формат: index=0)
                     int indexStart = decryptedBody.indexOf("index=");
@@ -1796,7 +1793,7 @@ void WebServerManager::start() {
                 return request->send(400, "text/plain", "Invalid key index");
             }
             
-            auto keys = keyManager.getAllKeys();
+            const auto& keys = keyManager.getAllKeys();
             if (keyIndex >= keys.size()) {
                 return request->send(400, "text/plain", "Key index out of range");
             }
@@ -1811,7 +1808,7 @@ void WebServerManager::start() {
             }
             
             // Получаем обновленный ключ и генерируем новый код
-            auto updatedKeys = keyManager.getAllKeys();
+            const auto& updatedKeys = keyManager.getAllKeys();
             String newCode = totpGenerator.generateCode(updatedKeys[keyIndex]);
             
             // Формируем JSON ответ
@@ -1955,7 +1952,7 @@ void WebServerManager::start() {
                 resetActivityTimer();
             }
             
-            auto passwords = passwordManager.getAllPasswords();
+            const auto& passwords = passwordManager.getAllPasswords();
             // Список паролей - увеличенный размер для 50 длинных паролей (до 70 символов каждый)
             JsonDocument doc;
             JsonArray array = doc.to<JsonArray>();
@@ -1966,7 +1963,13 @@ void WebServerManager::start() {
                 obj["strength"] = entry.strength;
                 obj["pw_hash"] = entry.pw_hash;
                 obj["category"]  = entry.category;
-                obj["auto_send"] = entry.auto_send;
+                obj["auto_send"] = entry.getAutoSend();
+                obj["send_login"] = entry.getSendLogin();
+                obj["login"] = entry.login;
+                obj["nav_mode"] = entry.nav_mode;
+                obj["login_delay_ms"] = entry.login_delay_ms;
+                obj["wildcard"] = entry.getWildcard();
+                obj["wildcard_len"] = entry.wildcard_len;
             }
             String output;
             serializeJson(doc, output);
@@ -2053,27 +2056,89 @@ void WebServerManager::start() {
                         if (categoryStart >= 0) {
                             int categoryEnd = decryptedBody.indexOf("&", categoryStart);
                             if (categoryEnd == -1) categoryEnd = decryptedBody.length();
-                            category = decryptedBody.substring(categoryStart + 9, categoryEnd); // skip "category="
+                            category = decryptedBody.substring(categoryStart + 9, categoryEnd);
                         }
                         
                         bool autoSendVal = false;
                         int autoSendStart = decryptedBody.indexOf("auto_send=");
                         if (autoSendStart != -1) {
-                            autoSendStart += 10; // length of "auto_send="
+                            autoSendStart += 10;
                             int autoSendEnd = decryptedBody.indexOf("&", autoSendStart);
                             if (autoSendEnd == -1) autoSendEnd = decryptedBody.length();
                             String autoSendStr = decryptedBody.substring(autoSendStart, autoSendEnd);
                             autoSendVal = (autoSendStr == "1" || autoSendStr == "true");
                         }
                         
+                        String login = "";
+                        int loginStart = decryptedBody.indexOf("login=");
+                        if (loginStart != -1) {
+                            loginStart += 6;
+                            int loginEnd = decryptedBody.indexOf("&", loginStart);
+                            if (loginEnd == -1) loginEnd = decryptedBody.length();
+                            login = decryptedBody.substring(loginStart, loginEnd);
+                        }
+                        
+                        bool sendLoginVal = false;
+                        int sendLoginStart = decryptedBody.indexOf("send_login=");
+                        if (sendLoginStart != -1) {
+                            sendLoginStart += 11;
+                            int sendLoginEnd = decryptedBody.indexOf("&", sendLoginStart);
+                            if (sendLoginEnd == -1) sendLoginEnd = decryptedBody.length();
+                            String sendLoginStr = decryptedBody.substring(sendLoginStart, sendLoginEnd);
+                            sendLoginVal = (sendLoginStr == "1" || sendLoginStr == "true");
+                        }
+                        
+                        String navMode = "enter";
+                        int navModeStart = decryptedBody.indexOf("nav_mode=");
+                        if (navModeStart != -1) {
+                            navModeStart += 9;
+                            int navModeEnd = decryptedBody.indexOf("&", navModeStart);
+                            if (navModeEnd == -1) navModeEnd = decryptedBody.length();
+                            navMode = decryptedBody.substring(navModeStart, navModeEnd);
+                        }
+                        
+                        int loginDelayMs = 300;
+                        int loginDelayStart = decryptedBody.indexOf("login_delay_ms=");
+                        if (loginDelayStart != -1) {
+                            loginDelayStart += 15;
+                            int loginDelayEnd = decryptedBody.indexOf("&", loginDelayStart);
+                            if (loginDelayEnd == -1) loginDelayEnd = decryptedBody.length();
+                            loginDelayMs = decryptedBody.substring(loginDelayStart, loginDelayEnd).toInt();
+                        }
+                        
                         // URL decode
                         name.replace("+", " ");
                         password.replace("+", " ");
                         category.replace("+", " ");
+                        login.replace("+", " ");
+                        
+                        bool wildcardVal = false;
+                        int wildcardStart = decryptedBody.indexOf("wildcard=");
+                        if (wildcardStart != -1) {
+                            wildcardStart += 9;
+                            int wildcardEnd = decryptedBody.indexOf("&", wildcardStart);
+                            if (wildcardEnd == -1) wildcardEnd = decryptedBody.length();
+                            String wildcardStr = decryptedBody.substring(wildcardStart, wildcardEnd);
+                            wildcardVal = (wildcardStr == "1" || wildcardStr == "true");
+                        }
+                        int wildcardLenVal = 16;
+                        int wildcardLenStart = decryptedBody.indexOf("wildcard_len=");
+                        if (wildcardLenStart != -1) {
+                            wildcardLenStart += 13;
+                            int wildcardLenEnd = decryptedBody.indexOf("&", wildcardLenStart);
+                            if (wildcardLenEnd == -1) wildcardLenEnd = decryptedBody.length();
+                            wildcardLenVal = decryptedBody.substring(wildcardLenStart, wildcardLenEnd).toInt();
+                        }
+                        if (wildcardVal) {
+                            // System-managed identity: never trust client-supplied
+                            // name/password for a wildcard entry.
+                            name = "random";
+                            password = "[wildcard]";
+                        }
                         
                         LOG_DEBUG("WebServer", "🔐 Parsed password add: name=" + name + ", password length=" + String(password.length()));
                         
-                        passwordManager.addPassword(name, password, category, autoSendVal);
+                        passwordManager.addPassword(name, password, category, autoSendVal, login, sendLoginVal, navMode, loginDelayMs, wildcardVal, wildcardLenVal);
                         return request->send(200, "text/plain", "Password added securely");
                     } else {
                         return request->send(400, "text/plain", "Invalid decrypted password add format");
@@ -2087,6 +2152,11 @@ void WebServerManager::start() {
             {
                 // Обычный незашифрованный запрос - читаем параметры
                 bool autoSendVal = false;
+                String login = "";
+                bool sendLoginVal = false;
+                String navMode = "enter";
+                int loginDelayMs = 300;
+                
                 if (request->hasParam("name", true) && request->hasParam("password", true)) {
                     name = request->getParam("name", true)->value();
                     password = request->getParam("password", true)->value();
@@ -2097,6 +2167,19 @@ void WebServerManager::start() {
                         String s = request->getParam("auto_send", true)->value();
                         autoSendVal = (s == "1" || s == "true");
                     }
+                    if (request->hasParam("login", true)) {
+                        login = request->getParam("login", true)->value();
+                    }
+                    if (request->hasParam("send_login", true)) {
+                        String s = request->getParam("send_login", true)->value();
+                        sendLoginVal = (s == "1" || s == "true");
+                    }
+                    if (request->hasParam("nav_mode", true)) {
+                        navMode = request->getParam("nav_mode", true)->value();
+                    }
+                    if (request->hasParam("login_delay_ms", true)) {
+                        loginDelayMs = request->getParam("login_delay_ms", true)->value().toInt();
+                    }
                 } else {
                     return request->send(400, "text/plain", "Missing required parameters");
                 }
@@ -2105,7 +2188,23 @@ void WebServerManager::start() {
                     return request->send(400, "text/plain", "Name and password cannot be empty");
                 }
                 
-                passwordManager.addPassword(name, password, category, autoSendVal);
+                bool wildcardVal = false;
+                if (request->hasParam("wildcard", true)) {
+                    String s = request->getParam("wildcard", true)->value();
+                    wildcardVal = (s == "1" || s == "true");
+                }
+                int wildcardLenVal = 16;
+                if (request->hasParam("wildcard_len", true)) {
+                    wildcardLenVal = request->getParam("wildcard_len", true)->value().toInt();
+                }
+                if (wildcardVal) {
+                    // System-managed identity: never trust client-supplied
+                    // name/password for a wildcard entry.
+                    name = "random";
+                    password = "[wildcard]";
+                }
+                
+                passwordManager.addPassword(name, password, category, autoSendVal, login, sendLoginVal, navMode, loginDelayMs, wildcardVal, wildcardLenVal);
             }
             
             String response = "Password added successfully!";
@@ -2244,7 +2343,7 @@ void WebServerManager::start() {
                 return;
             }
             
-            auto passwords = passwordManager.getAllPasswords();
+            const auto& passwords = passwordManager.getAllPasswords();
             if (index >= 0 && index < passwords.size()) {
                     LOG_INFO("WebServer", "🔐 Password retrieved for editing: index " + String(index));
                     
@@ -2253,7 +2352,10 @@ void WebServerManager::start() {
                     doc["name"] = passwords[index].name;
                     doc["password"] = passwords[index].password;
                     doc["category"]  = passwords[index].category;
-                    doc["auto_send"] = passwords[index].auto_send;
+                    doc["auto_send"] = passwords[index].getAutoSend();
+                    doc["send_login"] = passwords[index].getSendLogin();
+                    doc["login"] = passwords[index].login;
+                    doc["nav_mode"] = passwords[index].nav_mode;
                     String output;
                     serializeJson(doc, output);
                     
@@ -2340,21 +2442,70 @@ void WebServerManager::start() {
                         bool autoSendVal = false;
                         int autoSendStart = decryptedBody.indexOf("auto_send=");
                         if (autoSendStart != -1) {
-                            autoSendStart += 10; // length of "auto_send="
+                            autoSendStart += 10;
                             int autoSendEnd = decryptedBody.indexOf("&", autoSendStart);
                             if (autoSendEnd == -1) autoSendEnd = decryptedBody.length();
                             String autoSendStr = decryptedBody.substring(autoSendStart, autoSendEnd);
                             autoSendVal = (autoSendStr == "1" || autoSendStr == "true");
                         }
                         
+                        String login = "";
+                        int loginStart = decryptedBody.indexOf("login=");
+                        if (loginStart != -1) {
+                            loginStart += 6;
+                            int loginEnd = decryptedBody.indexOf("&", loginStart);
+                            if (loginEnd == -1) loginEnd = decryptedBody.length();
+                            login = decryptedBody.substring(loginStart, loginEnd);
+                        }
+                        
+                        bool sendLoginVal = false;
+                        int sendLoginStart = decryptedBody.indexOf("send_login=");
+                        if (sendLoginStart != -1) {
+                            sendLoginStart += 11;
+                            int sendLoginEnd = decryptedBody.indexOf("&", sendLoginStart);
+                            if (sendLoginEnd == -1) sendLoginEnd = decryptedBody.length();
+                            String sendLoginStr = decryptedBody.substring(sendLoginStart, sendLoginEnd);
+                            sendLoginVal = (sendLoginStr == "1" || sendLoginStr == "true");
+                        }
+                        
+                        String navMode = "enter";
+                        int navModeStart = decryptedBody.indexOf("nav_mode=");
+                        if (navModeStart != -1) {
+                            navModeStart += 9;
+                            int navModeEnd = decryptedBody.indexOf("&", navModeStart);
+                            if (navModeEnd == -1) navModeEnd = decryptedBody.length();
+                            navMode = decryptedBody.substring(navModeStart, navModeEnd);
+                        }
+                        
+                        int loginDelayMs = 300;
+                        int loginDelayStart = decryptedBody.indexOf("login_delay_ms=");
+                        if (loginDelayStart != -1) {
+                            loginDelayStart += 15;
+                            int loginDelayEnd = decryptedBody.indexOf("&", loginDelayStart);
+                            if (loginDelayEnd == -1) loginDelayEnd = decryptedBody.length();
+                            loginDelayMs = decryptedBody.substring(loginDelayStart, loginDelayEnd).toInt();
+                        }
+                        
                         // URL decode
                         name.replace("+", " ");
                         password.replace("+", " ");
                         category.replace("+", " ");
+                        login.replace("+", " ");
                         
+                        int wildcardLenVal = 16;
+                        int wildcardLenStart = decryptedBody.indexOf("wildcard_len=");
+                        if (wildcardLenStart != -1) {
+                            wildcardLenStart += 13;
+                            int wildcardLenEnd = decryptedBody.indexOf("&", wildcardLenStart);
+                            if (wildcardLenEnd == -1) wildcardLenEnd = decryptedBody.length();
+                            wildcardLenVal = decryptedBody.substring(wildcardLenStart, wildcardLenEnd).toInt();
+                        }
+                        // wildcard status is never assignable via update — it can only
+                        // be set at creation time (see PasswordManager::updatePassword,
+                        // which ignores this parameter for existing entries anyway).
                         LOG_DEBUG("WebServer", "🔐 Parsed: index=" + String(indexVal) + ", name=" + name + ", password length=" + String(password.length()));
                         
-                        if (passwordManager.updatePassword(indexVal, name, password, category, autoSendVal)) {
+                        if (passwordManager.updatePassword(indexVal, name, password, category, autoSendVal, login, sendLoginVal, navMode, loginDelayMs, false, wildcardLenVal)) {
                             LOG_INFO("WebServer", "Password entry updated successfully securely");
                             response = "Password updated successfully!";
                             statusCode = 200;
@@ -2377,6 +2528,11 @@ void WebServerManager::start() {
             {
                 // Обычный незашифрованный запрос
                 bool autoSendVal = false;
+                String login = "";
+                bool sendLoginVal = false;
+                String navMode = "enter";
+                int loginDelayMs = 300;
+                
                 if (request->hasParam("index", true) && request->hasParam("name", true) && request->hasParam("password", true)) {
                     indexVal = request->getParam("index", true)->value().toInt();
                     name = request->getParam("name", true)->value();
@@ -2388,13 +2544,33 @@ void WebServerManager::start() {
                         String s = request->getParam("auto_send", true)->value();
                         autoSendVal = (s == "1" || s == "true");
                     }
+                    if (request->hasParam("login", true)) {
+                        login = request->getParam("login", true)->value();
+                    }
+                    if (request->hasParam("send_login", true)) {
+                        String s = request->getParam("send_login", true)->value();
+                        sendLoginVal = (s == "1" || s == "true");
+                    }
+                    if (request->hasParam("nav_mode", true)) {
+                        navMode = request->getParam("nav_mode", true)->value();
+                    }
+                    if (request->hasParam("login_delay_ms", true)) {
+                        loginDelayMs = request->getParam("login_delay_ms", true)->value().toInt();
+                    }
                 } else {
                     return request->send(400, "text/plain", "Missing required parameters");
                 }
                 
+                int wildcardLenVal = 16;
+                if (request->hasParam("wildcard_len", true)) {
+                    wildcardLenVal = request->getParam("wildcard_len", true)->value().toInt();
+                }
+                // wildcard status is never assignable via update — see
+                // PasswordManager::updatePassword, which ignores this
+                // parameter for existing entries.
                 LOG_INFO("WebServer", "Password update requested for entry at index " + String(indexVal));
                 
-                if (passwordManager.updatePassword(indexVal, name, password, category, autoSendVal)) {
+                if (passwordManager.updatePassword(indexVal, name, password, category, autoSendVal, login, sendLoginVal, navMode, loginDelayMs, false, wildcardLenVal)) {
                     LOG_INFO("WebServer", "Password entry updated successfully");
                     response = "Password updated successfully!";
                     statusCode = 200;
@@ -2487,268 +2663,12 @@ void WebServerManager::start() {
         }
     }
 
-    // API: Export passwords (SECURE TESTING ENABLED + URL OBFUSCATION + REQUEST DECRYPTION)
-    auto passwordExportHandler = [this](AsyncWebServerRequest *request){
-        // Основной обработчик - пустой, вся логика в onBody callback
-    };
-    
-    auto passwordExportBodyHandler = [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-        if (index + len == total) {
-            if (!isAuthenticated(request)) return request->send(401);
-            if (!verifyCsrfToken(request)) return request->send(403, "text/plain", "CSRF token mismatch");
-            if (!WebAdminManager::getInstance().isApiEnabled()) {
-                LOG_WARNING("WebServer", "Blocked unauthorized attempt to export passwords (API disabled).");
-                return request->send(403, "text/plain", "API access for import/export is disabled.");
-            }
-            
-            String password;
-            
-#ifdef SECURE_LAYER_ENABLED
-            String clientId = WebServerSecureIntegration::getClientId(request);
-            if (clientId.length() > 0 && secureLayer.isSecureSessionValid(clientId) && 
-                (request->hasHeader("X-Secure-Request") || request->hasHeader("X-Security-Level"))) {
-                
-                LOG_INFO("WebServer", "🔐 PASSWORD EXPORT: Decrypting request body for " + clientId.substring(0,8) + "...");
-                
-                // Расшифровываем тело запроса
-                String encryptedBody = String((char*)data, len);
-                String decryptedBody;
-                
-                if (secureLayer.decryptRequest(clientId, encryptedBody, decryptedBody)) {
-                    LOG_DEBUG("WebServer", "🔐 Decrypted password export body length: " + String(decryptedBody.length()) + " bytes");
-                    
-                    // Парсим расшифрованные данные (формат: password=adminpass)
-                    int passwordStart = decryptedBody.indexOf("password=");
-                    if (passwordStart >= 0) {
-                        int passwordEnd = decryptedBody.indexOf("&", passwordStart);
-                        if (passwordEnd == -1) passwordEnd = decryptedBody.length();
-                        
-                        password = decryptedBody.substring(passwordStart + 9, passwordEnd); // skip "password="
-                        
-                        // URL decode пароля (заменяем %XX на символы)
-                        password.replace("+", " ");
-                        password.replace("%21", "!");
-                        password.replace("%40", "@");
-                        password.replace("%23", "#");
-                        password.replace("%24", "$");
-                        password.replace("%25", "%");
-                        password.replace("%5E", "^");
-                        password.replace("%26", "&");
-                        password.replace("%2A", "*");
-                        password.replace("%28", "(");
-                        password.replace("%29", ")");
-                        password.replace("%2D", "-");
-                        password.replace("%5F", "_");
-                        password.replace("%3D", "=");
-                        password.replace("%2B", "+");
-                        password.replace("%5B", "[");
-                        password.replace("%5D", "]");
-                        password.replace("%7B", "{");
-                        password.replace("%7D", "}");
-                        password.replace("%5C", "\\");
-                        password.replace("%7C", "|");
-                        password.replace("%3B", ";");
-                        password.replace("%3A", ":");
-                        password.replace("%27", "'");
-                        password.replace("%22", "\"");
-                        password.replace("%3C", "<");
-                        password.replace("%3E", ">");
-                        password.replace("%2C", ",");
-                        password.replace("%2E", ".");
-                        password.replace("%3F", "?");
-                        password.replace("%2F", "/");
-                        
-                        LOG_DEBUG("WebServer", "🔐 Parsed and URL-decoded admin password for password export");
-                    } else {
-                        return request->send(400, "text/plain", "Invalid decrypted password export format");
-                    }
-                } else {
-                    LOG_ERROR("WebServer", "🔐 Failed to decrypt password export request body");
-                    return request->send(400, "text/plain", "Password export decryption failed");
-                }
-            } else 
-#endif
-            {
-                // Обычный незашифрованный запрос - читаем параметры
-                if (!request->hasParam("password", true)) {
-                    return request->send(400, "text/plain", "Password is required for export.");
-                }
-                password = request->getParam("password", true)->value();
-            }
-            
-            if (password.isEmpty()) {
-                return request->send(400, "text/plain", "Password cannot be empty");
-            }
-            
-            if (!WebAdminManager::getInstance().verifyCredentials(WebAdminManager::getInstance().getUsername(), password)) {
-                LOG_WARNING("WebServer", "Password export failed: Invalid admin password provided.");
-                return request->send(401, "text/plain", "Invalid admin password.");
-            }
 
-            LOG_INFO("WebServer", "Password verified. Starting password export process.");
-            auto passwords = passwordManager.getAllPasswordsForExport();
-            
-            JsonDocument doc;
-            JsonArray array = doc.to<JsonArray>();
-            for (const auto& entry : passwords) {
-                JsonObject obj = array.add<JsonObject>();
-                obj["name"] = entry.name;
-                obj["password"] = entry.password;
-                obj["strength"] = entry.strength;
-                obj["pw_hash"] = entry.pw_hash;
-                obj["category"]  = entry.category;
-                obj["auto_send"] = entry.auto_send;
-            }
-            String plaintext;
-            serializeJson(doc, plaintext);
 
-            String encryptedContent = CryptoManager::getInstance().encryptWithPassword(plaintext, password);
 
-            // 🔐 ВАЖНО: Не используем sendSecureResponse для файлов - контент уже зашифрован CryptoManager
-            LOG_INFO("WebServer", "🔐 PASSWORD EXPORT: Sending encrypted file (pre-encrypted by CryptoManager)");
-            AsyncWebServerResponse *response = request->beginResponse(200, "application/json", encryptedContent);
-            response->addHeader("Content-Disposition", "attachment; filename=\"encrypted_passwords_backup.json\"");
-            request->send(response);
-        }
-    };
-    
-    // Регистрируем оба варианта: оригинальный и обфусцированный
-    server.on("/api/passwords/export", HTTP_POST, passwordExportHandler, NULL, passwordExportBodyHandler);
-    String obfuscatedPasswordExportPath = urlObfuscation.obfuscateURL("/api/passwords/export");
-    if (obfuscatedPasswordExportPath.length() > 0 && obfuscatedPasswordExportPath != "/api/passwords/export") {
-        server.on(obfuscatedPasswordExportPath.c_str(), HTTP_POST, passwordExportHandler, NULL, passwordExportBodyHandler);
-    }
 
-    // API: Import passwords (SECURE TESTING ENABLED + URL OBFUSCATION)
-    URLObfuscationIntegration::registerDualEndpointWithBody(server, "/api/passwords/import", HTTP_POST, 
-        [this](AsyncWebServerRequest *request) {
-            // Empty handler, body handler does the work
-        }, [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-            if (!isAuthenticated(request)) {
-                if (index == 0) request->send(401);
-                return;
-            }
-            if (!WebAdminManager::getInstance().isApiEnabled()) {
-                if (index == 0) {
-                    LOG_WARNING("WebServer", "Blocked unauthorized attempt to import passwords (API disabled).");
-                    request->send(403, "text/plain", "API access for import/export is disabled.");
-                }
-                return;
-            }
 
-            static String body;
-            if (index == 0) body = "";
-            body.concat((char*)data, len);
 
-            if (index + len >= total) {
-                LOG_INFO("WebServer", "Received passwords import data.");
-                
-                String finalBody = body;
-                String clientId; // Объявляем заранее для использования в нескольких блоках
-                
-#ifdef SECURE_LAYER_ENABLED
-                // 🔐 Проверяем XOR зашифрованный запрос
-                clientId = WebServerSecureIntegration::getClientId(request);
-                if (clientId.length() > 0 && secureLayer.isSecureSessionValid(clientId) && 
-                    (request->hasHeader("X-Secure-Request") || request->hasHeader("X-Security-Level"))) {
-                    
-                    LOG_INFO("WebServer", "🔐 PASSWORDS IMPORT: Decrypting XOR request body for " + clientId.substring(0,8) + "...");
-                    
-                    // Расшифровываем XOR тело запроса
-                    String decryptedBody;
-                    if (secureLayer.decryptRequest(clientId, body, decryptedBody)) {
-                        LOG_DEBUG("WebServer", "🔐 XOR decrypted passwords import body length: " + String(decryptedBody.length()) + " bytes");
-                        finalBody = decryptedBody;
-                    } else {
-                        LOG_ERROR("WebServer", "🔐 Failed to XOR decrypt passwords import request body");
-                        request->send(400, "text/plain", "Passwords import XOR decryption failed");
-                        return;
-                    }
-                }
-#endif
-                
-                JsonDocument doc;
-                if (deserializeJson(doc, finalBody) != DeserializationError::Ok) {
-                    request->send(400, "text/plain", "Invalid JSON body.");
-                    return;
-                }
-
-                String password = doc["password"];
-                String fileContent = doc["data"];
-
-                if (password.isEmpty() || fileContent.isEmpty()) {
-                    request->send(400, "text/plain", "Missing password or file data.");
-                    return;
-                }
-
-                String decryptedContent = CryptoManager::getInstance().decryptWithPassword(fileContent, password);
-
-                if (decryptedContent.isEmpty()) {
-                    LOG_WARNING("WebServer", "Failed to decrypt imported passwords. Wrong password or corrupt file.");
-                    
-                    String errorResponse = "Decryption failed. Wrong password or corrupt file.";
-                    
-#ifdef SECURE_LAYER_ENABLED
-                    // КРИТИЧНО: Принудительное шифрование ошибок для password операций
-                    String clientId = WebServerSecureIntegration::getClientId(request);
-                    bool isTunneled = request->hasHeader("X-Real-Method");
-                    
-                    if (clientId.length() > 0 && secureLayer.isSecureSessionValid(clientId)) {
-                        LOG_INFO("WebServer", "🔐 PASSWORD IMPORT ERROR ENCRYPTION: Securing error response for client " + clientId.substring(0,8) + "..." + (isTunneled ? " [TUNNELED]" : " [DIRECT]"));
-                        WebServerSecureIntegration::sendSecureResponse(request, 400, "text/plain", errorResponse, secureLayer);
-                        return;
-                    }
-#endif
-                    
-                    request->send(400, "text/plain", errorResponse);
-                    return;
-                }
-
-                String response;
-                int statusCode;
-                
-                if (passwordManager.replaceAllPasswords(decryptedContent)) {
-                    LOG_INFO("WebServer", "Passwords imported successfully.");
-                    response = "Import successful!";
-                    statusCode = 200;
-                } else {
-                    LOG_ERROR("WebServer", "Failed to process imported passwords after decryption.");
-                    response = "Failed to process passwords after decryption.";
-                    statusCode = 500;
-                }
-                
-#ifdef SECURE_LAYER_ENABLED
-                // 🔐 Переиспользуем clientId из блока расшифровки выше
-                if (clientId.length() > 0 && secureLayer.isSecureSessionValid(clientId)) {
-                    LOG_INFO("WebServer", "🔐 PASSWORD IMPORT ENCRYPTION: Securing response");
-                    WebServerSecureIntegration::sendSecureResponse(request, statusCode, "text/plain", response, secureLayer);
-                    return;
-                }
-#endif
-                
-                request->send(statusCode, "text/plain", response);
-            }
-        }, urlObfuscation);
-
-    // --- API для управления доступом к импорту/экспорту ---
-    server.on("/api/enable_import_export", HTTP_POST, [this](AsyncWebServerRequest *request){
-        if (!isAuthenticated(request)) return request->send(401);
-        if (!verifyCsrfToken(request)) return request->send(403, "text/plain", "CSRF token mismatch");
-        WebAdminManager::getInstance().enableApi();
-        request->send(200, "text/plain", "API enabled for 5 minutes.");
-    });
-
-    server.on("/api/import_export_status", HTTP_GET, [this](AsyncWebServerRequest *request){
-        if (!isAuthenticated(request)) return request->send(401);
-        auto& adminManager = WebAdminManager::getInstance();
-        // Статус API - небольшой размер
-        JsonDocument doc;
-        doc["enabled"] = adminManager.isApiEnabled();
-        doc["timeLeft"] = adminManager.getApiTimeRemaining();
-        String output;
-        serializeJson(doc, output);
-        request->send(200, "application/json", output);
-    });
     
     // API: Public client bootstrap config - minimal pre-auth mappings
     server.on("/api/client/config", HTTP_GET, [this](AsyncWebServerRequest *request){
@@ -3119,252 +3039,9 @@ void WebServerManager::start() {
     // 🔒 SECURITY: OLD custom splash API endpoints /api/upload_splash and /api/delete_splash REMOVED
     // Custom splash upload feature disabled for security - only embedded splash screens supported
 
-    server.on("/api/export", HTTP_POST, [this](AsyncWebServerRequest *request){
-        // Основной обработчик - пустой, вся логика в onBody callback
-    }, NULL, [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-        // onBody callback - обрабатывает тело запроса для расшифровки пароля
-        if (index + len == total) {
-            if (!isAuthenticated(request)) return request->send(401);
-            if (!verifyCsrfToken(request)) return request->send(403, "text/plain", "CSRF token mismatch");
-            if (!WebAdminManager::getInstance().isApiEnabled()) {
-                LOG_WARNING("WebServer", "Blocked unauthorized attempt to export TOTP keys (API disabled).");
-                return request->send(403, "text/plain", "API access for import/export is disabled.");
-            }
-            
-            String password;
-            
-#ifdef SECURE_LAYER_ENABLED
-            String clientId = WebServerSecureIntegration::getClientId(request);
-            if (clientId.length() > 0 && secureLayer.isSecureSessionValid(clientId) && 
-                (request->hasHeader("X-Secure-Request") || request->hasHeader("X-Security-Level"))) {
-                
-                LOG_INFO("WebServer", "🔐 EXPORT: Decrypting request body for " + clientId.substring(0,8) + "...");
-                
-                // Расшифровываем тело запроса
-                String encryptedBody = String((char*)data, len);
-                String decryptedBody;
-                
-                if (secureLayer.decryptRequest(clientId, encryptedBody, decryptedBody)) {
-                    LOG_DEBUG("WebServer", "🔐 Decrypted export body length: " + String(decryptedBody.length()) + " bytes");
-                    
-                    // Парсим расшифрованные данные (формат: password=adminpass)
-                    int passwordStart = decryptedBody.indexOf("password=");
-                    if (passwordStart >= 0) {
-                        int passwordEnd = decryptedBody.indexOf("&", passwordStart);
-                        if (passwordEnd == -1) passwordEnd = decryptedBody.length();
-                        
-                        password = decryptedBody.substring(passwordStart + 9, passwordEnd); // skip "password="
-                        
-                        // URL decode пароля (заменяем %XX на символы)
-                        password.replace("+", " ");
-                        password.replace("%21", "!");
-                        password.replace("%40", "@");
-                        password.replace("%23", "#");
-                        password.replace("%24", "$");
-                        password.replace("%25", "%");
-                        password.replace("%5E", "^");
-                        password.replace("%26", "&");
-                        password.replace("%2A", "*");
-                        password.replace("%28", "(");
-                        password.replace("%29", ")");
-                        password.replace("%2D", "-");
-                        password.replace("%5F", "_");
-                        password.replace("%3D", "=");
-                        password.replace("%2B", "+");
-                        password.replace("%5B", "[");
-                        password.replace("%5D", "]");
-                        password.replace("%7B", "{");
-                        password.replace("%7D", "}");
-                        password.replace("%5C", "\\");
-                        password.replace("%7C", "|");
-                        password.replace("%3B", ";");
-                        password.replace("%3A", ":");
-                        password.replace("%27", "'");
-                        password.replace("%22", "\"");
-                        password.replace("%3C", "<");
-                        password.replace("%3E", ">");
-                        password.replace("%2C", ",");
-                        password.replace("%2E", ".");
-                        password.replace("%3F", "?");
-                        password.replace("%2F", "/");
-                        
-                        LOG_DEBUG("WebServer", "🔐 Parsed and URL-decoded admin password for TOTP export");
-                    } else {
-                        return request->send(400, "text/plain", "Invalid decrypted export format");
-                    }
-                } else {
-                    LOG_ERROR("WebServer", "🔐 Failed to decrypt export request body");
-                    return request->send(400, "text/plain", "Export decryption failed");
-                }
-            } else 
-#endif
-            {
-                // Обычный незашифрованный запрос - читаем параметры
-                if (!request->hasParam("password", true)) {
-                    return request->send(400, "text/plain", "Password is required for export.");
-                }
-                password = request->getParam("password", true)->value();
-            }
-            
-            if (password.isEmpty()) {
-                return request->send(400, "text/plain", "Password cannot be empty");
-            }
-            
-            if (!WebAdminManager::getInstance().verifyCredentials(WebAdminManager::getInstance().getUsername(), password)) {
-                LOG_WARNING("WebServer", "Export failed: Invalid admin password provided.");
-                return request->send(401, "text/plain", "Invalid admin password.");
-            }
 
-            LOG_INFO("WebServer", "Password verified. Starting TOTP keys export process.");
-            auto keys = keyManager.getAllKeys();
-            
-            JsonDocument doc;
-            JsonArray array = doc.to<JsonArray>();
-            for (const auto& key : keys) {
-                JsonObject obj = array.add<JsonObject>();
-                obj["name"] = key.name;
-                obj["secret"] = key.secret;
-                // Добавляем расширенные метаданные
-                obj["type"] = (key.type == TOTPType::HOTP) ? "H" : "T";
-                obj["algorithm"] = (key.algorithm == TOTPAlgorithm::SHA256) ? "256" :
-                                   (key.algorithm == TOTPAlgorithm::SHA512) ? "512" : "1";
-                obj["digits"] = key.digits;
-                obj["period"] = key.period;
-                if (key.counter != 0) {
-                    obj["counter"] = key.counter;
-                }
-            }
-            String plaintext;
-            serializeJson(doc, plaintext);
 
-            String encryptedContent = CryptoManager::getInstance().encryptWithPassword(plaintext, password);
-            
-            // 🔐 ВАЖНО: Не используем sendSecureResponse для файлов - контент уже зашифрован CryptoManager
-            LOG_INFO("WebServer", "🔐 TOTP EXPORT: Sending encrypted file (pre-encrypted by CryptoManager)");
-            AsyncWebServerResponse *response = request->beginResponse(200, "application/json", encryptedContent);
-            response->addHeader("Content-Disposition", "attachment; filename=\"encrypted_keys_backup.json\"");
-            request->send(response);
-        }
-    });
 
-    server.on("/api/import", HTTP_POST, [this](AsyncWebServerRequest *request) {
-        // This handler is intentionally left empty because the body handler below does all the work.
-        // We just need to ensure the endpoint exists.
-    }, NULL, [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-        if (!isAuthenticated(request)) {
-            if (index == 0) request->send(401);
-            return;
-        }
-        if (!WebAdminManager::getInstance().isApiEnabled()) {
-            if (index == 0) {
-                LOG_WARNING("WebServer", "Blocked unauthorized attempt to import TOTP keys (API disabled).");
-                request->send(403, "text/plain", "API access for import/export is disabled.");
-            }
-            return;
-        }
-
-        static String body;
-        if (index == 0) body = "";
-        body.concat((char*)data, len);
-
-        if (index + len >= total) {
-            LOG_INFO("WebServer", "Received TOTP keys import data.");
-            
-            String finalBody = body;
-            
-#ifdef SECURE_LAYER_ENABLED
-            // 🔐 Проверяем XOR зашифрованный запрос
-            String clientId = WebServerSecureIntegration::getClientId(request);
-            if (clientId.length() > 0 && secureLayer.isSecureSessionValid(clientId) && 
-                (request->hasHeader("X-Secure-Request") || request->hasHeader("X-Security-Level"))) {
-                
-                LOG_INFO("WebServer", "🔐 IMPORT: Decrypting XOR request body for " + clientId.substring(0,8) + "...");
-                
-                // Расшифровываем XOR тело запроса
-                String decryptedBody;
-                if (secureLayer.decryptRequest(clientId, body, decryptedBody)) {
-                    LOG_DEBUG("WebServer", "🔐 XOR decrypted import body length: " + String(decryptedBody.length()) + " bytes");
-                    finalBody = decryptedBody;
-                } else {
-                    LOG_ERROR("WebServer", "🔐 Failed to XOR decrypt import request body");
-                    request->send(400, "text/plain", "Import XOR decryption failed");
-                    return;
-                }
-            }
-#endif
-            
-            JsonDocument doc;
-            if (deserializeJson(doc, finalBody) != DeserializationError::Ok) {
-                request->send(400, "text/plain", "Invalid JSON body.");
-                return;
-            }
-
-            String password = doc["password"];
-            String fileContent = doc["data"];
-
-            if (password.isEmpty() || fileContent.isEmpty()) {
-                request->send(400, "text/plain", "Missing password or file data.");
-                return;
-            }
-
-            String decryptedContent = CryptoManager::getInstance().decryptWithPassword(fileContent, password);
-
-            if (decryptedContent.isEmpty()) {
-                LOG_WARNING("WebServer", "Failed to decrypt imported TOTP keys. Wrong password or corrupt file.");
-                request->send(400, "text/plain", "Decryption failed. Wrong password or corrupt file.");
-                return;
-            }
-
-            if (keyManager.replaceAllKeys(decryptedContent)) {
-                LOG_INFO("WebServer", "TOTP keys imported successfully.");
-                
-                // Формируем JSON ответ с подтверждением
-                JsonDocument responseDoc;
-                responseDoc["status"] = "success";
-                responseDoc["message"] = "Import successful!";
-                String jsonResponse;
-                serializeJson(responseDoc, jsonResponse);
-                
-#ifdef SECURE_LAYER_ENABLED
-                // КРИТИЧНО: Принудительное шифрование для import операций
-                String clientId = WebServerSecureIntegration::getClientId(request);
-                bool isTunneled = request->hasHeader("X-Real-Method");
-                
-                if (clientId.length() > 0 && secureLayer.isSecureSessionValid(clientId)) {
-                    LOG_INFO("WebServer", "🔐 IMPORT ENCRYPTION: Securing import response for client " + clientId.substring(0,8) + "..." + (isTunneled ? " [TUNNELED]" : " [DIRECT]"));
-                    WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", jsonResponse, secureLayer);
-                    return;
-                } else if (clientId.length() > 0) {
-                    LOG_WARNING("WebServer", "🔐 IMPORT FALLBACK: No valid secure session for " + clientId.substring(0,8) + "..., sending plaintext");
-                } else if (isTunneled) {
-                    LOG_DEBUG("WebServer", "🔐 IMPORT FALLBACK: Missing clientId header [TUNNELED REQUEST]");
-                }
-#endif
-                
-                request->send(200, "application/json", jsonResponse);
-            } else {
-                LOG_ERROR("WebServer", "Failed to process imported TOTP keys after decryption.");
-                
-                // Формируем JSON ответ с ошибкой
-                JsonDocument errorDoc;
-                errorDoc["status"] = "error";
-                errorDoc["message"] = "Failed to process keys after decryption.";
-                String errorResponse;
-                serializeJson(errorDoc, errorResponse);
-                
-#ifdef SECURE_LAYER_ENABLED
-                // Шифруем также ответы с ошибками
-                String clientId = WebServerSecureIntegration::getClientId(request);
-                if (clientId.length() > 0 && secureLayer.isSecureSessionValid(clientId)) {
-                    WebServerSecureIntegration::sendSecureResponse(request, 500, "application/json", errorResponse, secureLayer);
-                    return;
-                }
-#endif
-                
-                request->send(500, "application/json", errorResponse);
-            }
-        }
-    });
 
     server.on("/api/pincode_settings", HTTP_GET, [this](AsyncWebServerRequest *request){
         if (!isAuthenticated(request)) return request->send(401);
@@ -3685,6 +3362,11 @@ void WebServerManager::start() {
                     statusCode = 200;
                     success = false;
                     LOG_INFO("WebServer", "PIN protection already disabled");
+                } else if (CryptoManager::getInstance().isHiddenSpaceProvisioned()) {
+                    message = "Cannot disable PIN: Hidden Space is still active. Remove Hidden Space first.";
+                    statusCode = 400;
+                    success = false;
+                    LOG_WARNING("WebServer", "PIN disable blocked: Hidden Space provisioned - refusing before device prompt");
                 } else {
                     // Новая логика: устанавливаем глобальный флаг для запроса PIN на устройстве
                     LOG_INFO("WebServer", "PIN disable requested - will prompt on device");
@@ -3770,7 +3452,7 @@ void WebServerManager::start() {
                 String decryptedBody;
                 
                 if (secureLayer.decryptRequest(clientId, encryptedBody, decryptedBody)) {
-                    LOG_DEBUG("WebServer", "🔐 [MAIN] Decrypted BLE PIN body: " + decryptedBody.substring(0, 100));
+                    LOG_DEBUG("WebServer", "🔐 BLE PIN update requested");
                     isEncrypted = true;
                     
                     // Парсим расшифрованные данные
@@ -3924,6 +3606,16 @@ void WebServerManager::start() {
             if (!isAuthenticated(request)) return request->send(401);
             if (!verifyCsrfToken(request)) return request->send(403, "text/plain", "CSRF token mismatch");
 
+            if (!CryptoManager::getInstance().isDeviceKeyEncrypted()) {
+                JsonDocument guardDoc;
+                guardDoc["success"] = false;
+                guardDoc["message"] = "Duress PIN requires Startup PIN to be enabled first";
+                String guardResponse;
+                serializeJson(guardDoc, guardResponse);
+                WebServerSecureIntegration::sendSecureResponse(request, 400, "application/json", guardResponse, secureLayer);
+                return;
+            }
+
             String duressPinStr = ""; bool hasDuressPin = false;
             bool duressPinEnabled = false; bool duressPinEnabledProvided = false;
             bool isEncrypted = false; bool success = true;
@@ -4014,11 +3706,11 @@ void WebServerManager::start() {
             DateTime now = rtcManager.getCurrentTime();
             char iso[25];
             time_t utc_ts = now.unixtime();
-            struct tm localTm;
-            localtime_r(&utc_ts, &localTm);
-            snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02d:%02d:%02d",
-                     localTm.tm_year + 1900, localTm.tm_mon + 1, localTm.tm_mday,
-                     localTm.tm_hour, localTm.tm_min, localTm.tm_sec);
+            struct tm utcTm;
+            gmtime_r(&utc_ts, &utcTm);
+            snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02d:%02d:%02dZ",
+                     utcTm.tm_year + 1900, utcTm.tm_mon + 1, utcTm.tm_mday,
+                     utcTm.tm_hour, utcTm.tm_min, utcTm.tm_sec);
             doc["rtc_time"] = iso;
         } else {
             doc["rtc_time"] = nullptr;
@@ -4376,6 +4068,13 @@ void WebServerManager::start() {
                     return;
                 }
                 
+                if (!crypto.isDeviceKeyEncrypted()) {
+                    LOG_WARNING("WebServer", "Hidden space enable blocked: Startup PIN is not enabled");
+                    request->send(400, "application/json",
+                        "{\"error\":\"pin_required\",\"message\":\"Enable Startup PIN before creating Hidden Space\"}");
+                    return;
+                }
+                
                 // Create setup flag file
                 File flagFile = LittleFS.open("/.setup_hidden_space", "w");
                 if (!flagFile) {
@@ -4400,7 +4099,7 @@ void WebServerManager::start() {
 #endif
                 
                 delay(500);
-                ESP.restart();
+                secureRestart();
                 
             } else if (action == "disable") {
                 // Disable/wipe hidden space
@@ -4417,17 +4116,18 @@ void WebServerManager::start() {
                     return;
                 }
                 
-                // Wipe from Space A - allowed
-                LOG_INFO("WebServer", "Disabling hidden space from Space A");
+                // Wipe from Space A - allowed, but requires Space B's own PIN
+                // (entered on-device) to correctly locate its files. Prompt
+                // on device instead of wiping immediately.
+                LOG_INFO("WebServer", "Hidden space removal requested from Space A - will prompt on device");
                     
-                    if (!crypto.wipeHiddenSpace()) {
-                        LOG_ERROR("WebServer", "Failed to wipe hidden space");
-                        request->send(500, "application/json", "{\"error\":\"wipe_failed\"}");
-                        return;
-                    }
+                    extern bool shouldPromptRemoveHiddenSpace;
+                    shouldPromptRemoveHiddenSpace = true;
                     
                     JsonDocument resp;
-                    resp["status"] = "wiped_rebooting";
+                    resp["status"] = "prompt_on_device";
+                    resp["success"] = true;
+                    resp["message"] = "Please enter Space B PIN on device to confirm. Check device screen.";
                     String out;
                     serializeJson(resp, out);
                     
@@ -4436,9 +4136,6 @@ void WebServerManager::start() {
 #else
                     request->send(200, "application/json", out);
 #endif
-                    
-                    delay(500);
-                    ESP.restart();
                 
             } else if (action == "set_share_wifi") {
                 // Set WiFi sharing with hidden space
@@ -4820,6 +4517,66 @@ void WebServerManager::start() {
         },
         NULL,
         NULL
+    );
+
+    // API: Enter Import/Export Restricted Mode (POST)
+    server.on("/api/enter_import_export_mode", HTTP_POST,
+        [this](AsyncWebServerRequest *request){
+            // Empty main handler, body handler below verifies password
+            // and performs the flag-write + restart.
+        },
+        NULL,
+        [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+            if (!isAuthenticated(request)) {
+                if (index == 0) request->send(401);
+                return;
+            }
+            if (!verifyCsrfToken(request)) {
+                if (index == 0) request->send(403, "text/plain", "CSRF mismatch");
+                return;
+            }
+
+            static String body;
+            if (index == 0) body = "";
+            body.concat((char*)data, len);
+            if (index + len < total) return;
+
+            JsonDocument doc;
+            if (deserializeJson(doc, body) != DeserializationError::Ok) {
+                return request->send(400, "text/plain", "Invalid JSON body.");
+            }
+            String password = doc["password"];
+            if (password.isEmpty()) {
+                secureWipeString(password);
+                return request->send(400, "application/json", "{\"error\":\"password_required\"}");
+            }
+            bool verified = WebAdminManager::getInstance().verifyCredentials(WebAdminManager::getInstance().getUsername(), password);
+            secureWipeString(password);
+            if (!verified) {
+                LOG_WARNING("WebServer", "Enter restricted mode failed: invalid admin password.");
+                return request->send(401, "application/json", "{\"error\":\"invalid_password\"}");
+            }
+
+            File flagFile = LittleFS.open("/.setup_import_export", "w");
+            if (!flagFile) {
+                LOG_ERROR("WebServer", "Failed to create import/export setup flag");
+                return request->send(500, "application/json", "{\"error\":\"failed_to_create_flag\"}");
+            }
+            ActiveSpace requestingSpace = CryptoManager::getInstance().getActiveSpace();
+            flagFile.print(requestingSpace == ActiveSpace::B ? "B" : "A");
+            flagFile.close();
+
+            LOG_INFO("WebServer", "Import/Export restricted mode flag created, rebooting...");
+
+            JsonDocument resp;
+            resp["status"] = "rebooting";
+            String out;
+            serializeJson(resp, out);
+            request->send(200, "application/json", out);
+
+            delay(500);
+            secureRestart();
+        }
     );
 
     // Display Rotation endpoints
@@ -5522,7 +5279,7 @@ void WebServerManager::start() {
                     if (secureLayer.encryptResponse(clientId, response, encryptedResponse)) {
                         request->send(200, "application/json", encryptedResponse);
                         delay(1000);
-                        ESP.restart();
+                        secureRestart();
                     } else {
                         request->send(500, "text/plain", "Encryption failed");
                     }
@@ -5534,7 +5291,7 @@ void WebServerManager::start() {
                 LOG_INFO("WebServer", "System reboot requested");
                 request->send(200, "text/plain", "Rebooting...");
                 delay(1000);
-                ESP.restart();
+                secureRestart();
             }
         });
 
@@ -5579,7 +5336,7 @@ void WebServerManager::start() {
                     if (secureLayer.encryptResponse(clientId, response, encryptedResponse)) {
                         request->send(200, "application/json", encryptedResponse);
                         delay(1000);
-                        ESP.restart();
+                        secureRestart();
                     } else {
                         request->send(500, "text/plain", "Encryption failed");
                     }
@@ -5593,7 +5350,7 @@ void WebServerManager::start() {
                 request->send(200, "text/plain", "Rebooting with web server enabled...");
                 LOG_INFO("WebServer", "Web server auto-start flag set successfully");
                 delay(1000);
-                ESP.restart();
+                secureRestart();
             }
         });
 
@@ -5850,7 +5607,7 @@ void WebServerManager::start() {
                     // ArduinoJson 7 автоматически управляет памятью
                     JsonDocument doc;
                     JsonArray keysArray = doc.to<JsonArray>();
-                    auto keys = keyManager.getAllKeys();
+                    const auto& keys = keyManager.getAllKeys();
                     
                     // 🔐 Блокировка TOTP в AP/Offline режимах
                     bool blockTOTP = !totpGenerator.isTimeSynced();
@@ -5967,7 +5724,7 @@ void WebServerManager::start() {
                 if (targetEndpoint == "/api/show_qr" && targetMethod == "POST") {
                     int keyIndex = targetData["key_id"].as<int>();
                     
-                    auto keys = keyManager.getAllKeys();
+                    const auto& keys = keyManager.getAllKeys();
                     if (keyIndex < 0 || keyIndex >= keys.size()) {
                         LOG_ERROR("WebServer", "🚇 TUNNELED SHOW_QR: Invalid key index: " + String(keyIndex));
                         String output = "{\"error\":\"Key not found\"}";
@@ -6033,7 +5790,7 @@ void WebServerManager::start() {
                 if (targetEndpoint == "/api/hotp/generate" && targetMethod == "POST") {
                     int index = targetData["index"].as<int>();
                     
-                    auto keys = keyManager.getAllKeys();
+                    const auto& keys = keyManager.getAllKeys();
                     if (index < 0 || index >= keys.size()) {
                         return request->send(400, "text/plain", "Invalid key index");
                     }
@@ -6048,7 +5805,7 @@ void WebServerManager::start() {
                         return request->send(500, "text/plain", "Failed to increment HOTP counter");
                     }
                     
-                    auto updatedKeys = keyManager.getAllKeys();
+                    const auto& updatedKeys = keyManager.getAllKeys();
                     String newCode = totpGenerator.generateCode(updatedKeys[index]);
                     
                     // 🛡️ Ручное формирование JSON
@@ -6095,103 +5852,10 @@ void WebServerManager::start() {
                     return;
                 }
                 
-                // 🎯 МАРШРУТИЗАЦИЯ: /api/export POST
-                if (targetEndpoint == "/api/export" && targetMethod == "POST") {
-                    // Проверка API доступа
-                    if (!WebAdminManager::getInstance().isApiEnabled()) {
-                        LOG_WARNING("WebServer", "🚇 TUNNELED export blocked: API disabled");
-                        return request->send(403, "text/plain", "API access for import/export is disabled.");
-                    }
-                    
-                    String password = targetData["password"].as<String>();
-                    
-                    if (password.isEmpty()) {
-                        return request->send(400, "text/plain", "Password cannot be empty");
-                    }
-                    
-                    // Проверка admin пароля
-                    if (!WebAdminManager::getInstance().verifyCredentials(WebAdminManager::getInstance().getUsername(), password)) {
-                        LOG_WARNING("WebServer", "🚇 TUNNELED export failed: Invalid admin password");
-                        return request->send(401, "text/plain", "Invalid admin password.");
-                    }
-                    
-                    LOG_INFO("WebServer", "🚇 TUNNELED TOTP export: Password verified");
-                    auto keys = keyManager.getAllKeys();
-                    
-                    // ArduinoJson 7 автоматически управляет памятью
-                    JsonDocument doc;
-                    JsonArray array = doc.to<JsonArray>();
-                    for (const auto& key : keys) {
-                        JsonObject obj = array.add<JsonObject>();
-                        obj["name"] = key.name;
-                        obj["secret"] = key.secret;
-                        // Добавляем расширенные метаданные
-                        obj["type"] = (key.type == TOTPType::HOTP) ? "H" : "T";
-                        obj["algorithm"] = (key.algorithm == TOTPAlgorithm::SHA256) ? "256" :
-                                           (key.algorithm == TOTPAlgorithm::SHA512) ? "512" : "1";
-                        obj["digits"] = key.digits;
-                        obj["period"] = key.period;
-                        if (key.counter != 0) {
-                            obj["counter"] = key.counter;
-                        }
-                    }
-                    String plaintext;
-                    serializeJson(doc, plaintext);
-                    
-                    String encryptedContent = CryptoManager::getInstance().encryptWithPassword(plaintext, password);
-                    
-                    LOG_INFO("WebServer", "💾 TOTP EXPORT: Sending encrypted file directly [TUNNELED]");
-                    // Файл уже зашифрован CryptoManager, отправляем напрямую
-                    // Не нужно оборачивать в JSON - encryptedContent уже JSON
-                    
-                    // Отправляем через XOR шифрование
-                    WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", encryptedContent, secureLayer);
-                    return;
-                }
+
                 
                 // 🎯 МАРШРУТИЗАЦИЯ: /api/import POST
-                if (targetEndpoint == "/api/import" && targetMethod == "POST") {
-                    // Проверка API доступа
-                    if (!WebAdminManager::getInstance().isApiEnabled()) {
-                        LOG_WARNING("WebServer", "🚇 TUNNELED import blocked: API disabled");
-                        return request->send(403, "text/plain", "API access for import/export is disabled.");
-                    }
-                    
-                    String password = targetData["password"].as<String>();
-                    String fileContent = targetData["data"].as<String>();
-                    
-                    if (password.isEmpty() || fileContent.isEmpty()) {
-                        LOG_ERROR("WebServer", "❌ TUNNELED import: Missing data (pwd:" + String(password.length()) + ", file:" + String(fileContent.length()) + ")");
-                        return request->send(400, "text/plain", "Missing password or file data.");
-                    }
-                    
-                    LOG_INFO("WebServer", "🚇 TUNNELED TOTP import: Decrypting file content");
-                    String decryptedContent = CryptoManager::getInstance().decryptWithPassword(fileContent, password);
-                    
-                    if (decryptedContent.isEmpty()) {
-                        LOG_WARNING("WebServer", "🚇 TUNNELED import failed: Decryption failed");
-                        return request->send(400, "text/plain", "Decryption failed. Wrong password or corrupt file.");
-                    }
-                    
-                    if (keyManager.replaceAllKeys(decryptedContent)) {
-                        LOG_INFO("WebServer", "🚇 TUNNELED TOTP import: Keys imported successfully");
-                        
-                        // 🛡️ Ручное формирование JSON
-                        String jsonResponse = "{\"status\":\"success\",\"message\":\"Import successful!\"}";
-                        
-                        LOG_INFO("WebServer", "🔐 IMPORT ENCRYPTION: Securing tunneled import response [TUNNELED]");
-                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", jsonResponse, secureLayer);
-                        return;
-                    } else {
-                        LOG_ERROR("WebServer", "🚇 TUNNELED import failed: Failed to process keys");
-                        
-                        // 🛡️ Ручное формирование JSON
-                        String errorResponse = "{\"status\":\"error\",\"message\":\"Failed to process keys after decryption.\"}";
-                        
-                        WebServerSecureIntegration::sendSecureResponse(request, 500, "application/json", errorResponse, secureLayer);
-                        return;
-                    }
-                }
+
                 
                 // 🎯 МАРШРУТИЗАЦИЯ: /api/passwords GET
                 if (targetEndpoint == "/api/passwords" && targetMethod == "GET") {
@@ -6200,7 +5864,7 @@ void WebServerManager::start() {
                     }
                     
                     LOG_INFO("WebServer", "🚇 TUNNELED passwords list request");
-                    auto passwords = passwordManager.getAllPasswords();
+                    const auto& passwords = passwordManager.getAllPasswords();
                     
                     // Создаем JSON в том же формате что и прямой endpoint
                     // ArduinoJson 7 автоматически управляет памятью
@@ -6213,7 +5877,13 @@ void WebServerManager::start() {
                         obj["strength"] = entry.strength;
                         obj["pw_hash"] = entry.pw_hash;
                         obj["category"]  = entry.category;
-                        obj["auto_send"] = entry.auto_send;
+                        obj["auto_send"] = entry.getAutoSend();
+                        obj["send_login"] = entry.getSendLogin();
+                        obj["login"] = entry.login;
+                        obj["nav_mode"] = entry.nav_mode;
+                        obj["login_delay_ms"] = entry.login_delay_ms;
+                        obj["wildcard"] = entry.getWildcard();
+                        obj["wildcard_len"] = entry.wildcard_len;
                     }
                     String output;
                     serializeJson(doc, output);
@@ -6223,103 +5893,9 @@ void WebServerManager::start() {
                     return;
                 }
                 
-                // 🎯 МАРШРУТИЗАЦИЯ: /api/passwords/export POST
-                if (targetEndpoint == "/api/passwords/export" && targetMethod == "POST") {
-                    // Проверка API доступа
-                    if (!WebAdminManager::getInstance().isApiEnabled()) {
-                        LOG_WARNING("WebServer", "🚇 TUNNELED passwords export blocked: API disabled");
-                        return request->send(403, "text/plain", "API access for import/export is disabled.");
-                    }
-                    
-                    String password = targetData["password"].as<String>();
-                    
-                    if (password.isEmpty()) {
-                        return request->send(400, "text/plain", "Password cannot be empty");
-                    }
-                    
-                    // Проверка admin пароля
-                    if (!WebAdminManager::getInstance().verifyCredentials(WebAdminManager::getInstance().getUsername(), password)) {
-                        LOG_WARNING("WebServer", "🚇 TUNNELED passwords export failed: Invalid admin password");
-                        return request->send(401, "text/plain", "Invalid admin password.");
-                    }
-                    
-                    LOG_INFO("WebServer", "🚇 TUNNELED passwords export: Password verified");
-                    auto passwords = passwordManager.getAllPasswords();
-                    
-                    JsonDocument doc;
-                    JsonArray array = doc.to<JsonArray>();
-                    for (const auto& entry : passwords) {
-                        JsonObject obj = array.add<JsonObject>();
-                        obj["name"] = entry.name;
-                        obj["password"] = entry.password;  // Только name и password в PasswordEntry
-                        obj["strength"] = entry.strength;
-                        obj["pw_hash"] = entry.pw_hash;
-                        obj["category"]  = entry.category;
-                        obj["auto_send"] = entry.auto_send;
-                    }
-                    String plaintext;
-                    serializeJson(doc, plaintext);
-                    
-                    String encryptedContent = CryptoManager::getInstance().encryptWithPassword(plaintext, password);
-                    
-                    LOG_INFO("WebServer", "💾 PASSWORDS EXPORT: Sending encrypted file directly [TUNNELED]");
-                    // Файл уже зашифрован CryptoManager, отправляем напрямую
-                    // Не нужно оборачивать в JSON - encryptedContent уже JSON
-                    
-                    // Отправляем через XOR шифрование
-                    WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", encryptedContent, secureLayer);
-                    return;
-                }
+
                 
-                // 🎯 МАРШРУТИЗАЦИЯ: /api/passwords/import POST
-                if (targetEndpoint == "/api/passwords/import" && targetMethod == "POST") {
-                    // Проверка API доступа
-                    if (!WebAdminManager::getInstance().isApiEnabled()) {
-                        LOG_WARNING("WebServer", "🚇 TUNNELED passwords import blocked: API disabled");
-                        return request->send(403, "text/plain", "API access for import/export is disabled.");
-                    }
-                    
-                    String password = targetData["password"].as<String>();
-                    String fileContent = targetData["data"].as<String>();
-                    
-                    if (password.isEmpty() || fileContent.isEmpty()) {
-                        LOG_ERROR("WebServer", "❌ TUNNELED passwords import: Missing data (pwd:" + String(password.length()) + ", file:" + String(fileContent.length()) + ")");
-                        return request->send(400, "text/plain", "Missing password or file data.");
-                    }
-                    
-                    LOG_INFO("WebServer", "🚇 TUNNELED passwords import: Decrypting file content");
-                    String decryptedContent = CryptoManager::getInstance().decryptWithPassword(fileContent, password);
-                    
-                    if (decryptedContent.isEmpty()) {
-                        LOG_WARNING("WebServer", "🚇 TUNNELED passwords import failed: Decryption failed");
-                        return request->send(400, "text/plain", "Decryption failed. Wrong password or corrupt file.");
-                    }
-                    
-                    if (passwordManager.replaceAllPasswords(decryptedContent)) {
-                        LOG_INFO("WebServer", "🚇 TUNNELED passwords import: Passwords imported successfully");
-                        
-                        JsonDocument responseDoc;
-                        responseDoc["status"] = "success";
-                        responseDoc["message"] = "Import successful!";
-                        String jsonResponse;
-                        serializeJson(responseDoc, jsonResponse);
-                        
-                        LOG_INFO("WebServer", "🔐 PASSWORDS IMPORT ENCRYPTION: Securing tunneled import response [TUNNELED]");
-                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", jsonResponse, secureLayer);
-                        return;
-                    } else {
-                        LOG_ERROR("WebServer", "🚇 TUNNELED passwords import failed: Failed to process passwords");
-                        
-                        JsonDocument errorDoc;
-                        errorDoc["status"] = "error";
-                        errorDoc["message"] = "Failed to process passwords after decryption.";
-                        String errorResponse;
-                        serializeJson(errorDoc, errorResponse);
-                        
-                        WebServerSecureIntegration::sendSecureResponse(request, 500, "application/json", errorResponse, secureLayer);
-                        return;
-                    }
-                }
+
                 
                 // 🎯 МАРШРУТИЗАЦИЯ: /api/passwords/add POST
                 if (targetEndpoint == "/api/passwords/add" && targetMethod == "POST") {
@@ -6333,9 +5909,32 @@ void WebServerManager::start() {
                     JsonVariant _as = targetData["auto_send"];
                     bool autoSend = (!_as.isNull() && (_as.as<bool>() || _as.as<String>() == "1" || _as.as<String>() == "true"));
                     
+                    String login = targetData["login"] | "";
+                    String navMode = targetData["nav_mode"] | "enter";
+                    int loginDelayMs = 300;
+                    if (!targetData["login_delay_ms"].isNull()) {
+                        loginDelayMs = targetData["login_delay_ms"].as<String>().toInt();
+                        if (loginDelayMs <= 0) loginDelayMs = 300;
+                    }
+                    JsonVariant _sl = targetData["send_login"];
+                    bool sendLogin = (!_sl.isNull() && (_sl.as<bool>() || _sl.as<String>() == "1" || _sl.as<String>() == "true"));
+                    JsonVariant _wc = targetData["wildcard"];
+                    bool wildcardVal = (!_wc.isNull() && (_wc.as<bool>() || _wc.as<String>() == "1" || _wc.as<String>() == "true"));
+                    int wildcardLenVal = 16;
+                    if (!targetData["wildcard_len"].isNull()) {
+                        wildcardLenVal = targetData["wildcard_len"].as<String>().toInt();
+                        if (wildcardLenVal <= 0) wildcardLenVal = 16;
+                    }
+                    if (wildcardVal) {
+                        // System-managed identity: never trust client-supplied
+                        // name/password for a wildcard entry.
+                        name = "random";
+                        password = "[wildcard]";
+                    }
+                    
                     LOG_INFO("WebServer", "🚇 TUNNELED Password add: " + name);
                     
-                    if (passwordManager.addPassword(name, password, category, autoSend)) {
+                    if (passwordManager.addPassword(name, password, category, autoSend, login, sendLogin, navMode, loginDelayMs, wildcardVal, wildcardLenVal)) {
                         LOG_INFO("WebServer", "🔐 Password added: " + name);
                         
                         JsonDocument responseDoc;
@@ -6403,7 +6002,7 @@ void WebServerManager::start() {
                     
                     LOG_INFO("WebServer", "🚇 TUNNELED Password get: index " + String(index));
                     
-                    auto passwords = passwordManager.getAllPasswords();
+                    const auto& passwords = passwordManager.getAllPasswords();
                     if (index >= 0 && index < passwords.size()) {
                         const auto& pwd = passwords[index];
                         
@@ -6411,7 +6010,11 @@ void WebServerManager::start() {
                         responseDoc["name"] = pwd.name;
                         responseDoc["password"] = pwd.password;
                         responseDoc["category"] = pwd.category;
-                        responseDoc["auto_send"] = pwd.auto_send;
+                        responseDoc["auto_send"] = pwd.getAutoSend();
+                        responseDoc["send_login"] = pwd.getSendLogin();
+                        responseDoc["login"] = pwd.login;
+                        responseDoc["nav_mode"] = pwd.nav_mode;
+                        responseDoc["login_delay_ms"] = pwd.login_delay_ms;
                         String jsonResponse;
                         serializeJson(responseDoc, jsonResponse);
                         
@@ -6443,9 +6046,39 @@ void WebServerManager::start() {
                     JsonVariant _as = targetData["auto_send"];
                     bool autoSend = (!_as.isNull() && (_as.as<bool>() || _as.as<String>() == "1" || _as.as<String>() == "true"));
                     
+                    String login = targetData["login"] | "";
+                    String navMode = targetData["nav_mode"] | "enter";
+                    int loginDelayMs = 300;
+                    if (!targetData["login_delay_ms"].isNull()) {
+                        loginDelayMs = targetData["login_delay_ms"].as<String>().toInt();
+                        if (loginDelayMs <= 0) loginDelayMs = 300;
+                    }
+                    JsonVariant _sl = targetData["send_login"];
+                    bool sendLogin = (!_sl.isNull() && (_sl.as<bool>() || _sl.as<String>() == "1" || _sl.as<String>() == "true"));
+                    JsonVariant _wc = targetData["wildcard"];
+                    bool wildcardVal = (!_wc.isNull() && (_wc.as<bool>() || _wc.as<String>() == "1" || _wc.as<String>() == "true"));
+                    int wildcardLenVal = 16;
+                    if (!targetData["wildcard_len"].isNull()) {
+                        wildcardLenVal = targetData["wildcard_len"].as<String>().toInt();
+                        if (wildcardLenVal <= 0) wildcardLenVal = 16;
+                    }
+                    if (wildcardVal) {
+                        // System-managed identity: never trust client-supplied
+                        // name/password for a wildcard entry.
+                        // Guard: only override if the existing stored entry is already a
+                        // wildcard — a normal-entry edit must not be corrupted if a client
+                        // injects wildcard=1 (PasswordManager will reject the conversion
+                        // via its immutability guard, but we must not silently rename here).
+                        const auto& _pwds = passwordManager.getAllPasswords();
+                        if (index >= 0 && index < (int)_pwds.size() && _pwds[index].getWildcard()) {
+                            name = "random";
+                            password = "[wildcard]";
+                        }
+                    }
+                    
                     LOG_INFO("WebServer", "🚇 TUNNELED Password update: index " + String(index) + ", name: " + name);
                     
-                    if (passwordManager.updatePassword(index, name, password, category, autoSend)) {
+                    if (passwordManager.updatePassword(index, name, password, category, autoSend, login, sendLogin, navMode, loginDelayMs, false, wildcardLenVal)) {
                         LOG_INFO("WebServer", "🔐 Password updated at index: " + String(index));
                         
                         JsonDocument responseDoc;
@@ -6646,11 +6279,11 @@ void WebServerManager::start() {
                         DateTime now = rtcManager.getCurrentTime();
                         char iso[25];
                         time_t utc_ts = now.unixtime();
-                        struct tm localTm;
-                        localtime_r(&utc_ts, &localTm);
-                        snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02d:%02d:%02d",
-                                 localTm.tm_year + 1900, localTm.tm_mon + 1, localTm.tm_mday,
-                                 localTm.tm_hour, localTm.tm_min, localTm.tm_sec);
+                        struct tm utcTm;
+                        gmtime_r(&utc_ts, &utcTm);
+                        snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02d:%02d:%02dZ",
+                                 utcTm.tm_year + 1900, utcTm.tm_mon + 1, utcTm.tm_mday,
+                                 utcTm.tm_hour, utcTm.tm_min, utcTm.tm_sec);
                         doc["rtc_time"] = iso;
                     } else {
                         doc["rtc_time"] = nullptr;
@@ -7212,6 +6845,11 @@ void WebServerManager::start() {
                             statusCode = 200;
                             success = false;
                             LOG_INFO("WebServer", "🚇 TUNNELED: PIN protection already disabled");
+                        } else if (CryptoManager::getInstance().isHiddenSpaceProvisioned()) {
+                            message = "Cannot disable PIN: Hidden Space is still active. Remove Hidden Space first.";
+                            statusCode = 400;
+                            success = false;
+                            LOG_WARNING("WebServer", "🚇 TUNNELED: PIN disable blocked: Hidden Space provisioned - refusing before device prompt");
                         } else {
                             // Новая логика: устанавливаем глобальный флаг для запроса PIN на устройстве
                             LOG_INFO("WebServer", "🚇 TUNNELED: PIN disable requested - will prompt on device");
@@ -7309,6 +6947,13 @@ void WebServerManager::start() {
                             return;
                         }
                         
+                        if (!crypto.isDeviceKeyEncrypted()) {
+                            LOG_WARNING("WebServer", "🚇 TUNNELED: Hidden space enable blocked: Startup PIN is not enabled");
+                            String errorResp = "{\"error\":\"pin_required\",\"message\":\"Enable Startup PIN before creating Hidden Space\"}";
+                            WebServerSecureIntegration::sendSecureResponse(request, 400, "application/json", errorResp, secureLayer);
+                            return;
+                        }
+                        
                         // Create setup flag file
                         File flagFile = LittleFS.open("/.setup_hidden_space", "w");
                         if (!flagFile) {
@@ -7330,7 +6975,7 @@ void WebServerManager::start() {
                         WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", out, secureLayer);
                         
                         delay(500);
-                        ESP.restart();
+                        secureRestart();
                         return;
                         
                     } else if (action == "disable") {
@@ -7349,25 +6994,22 @@ void WebServerManager::start() {
                             return;
                         }
                         
-                        // Wipe from Space A - allowed
-                        LOG_INFO("WebServer", "🚇 TUNNELED: Disabling hidden space from Space A");
+                        // Wipe from Space A - allowed, but requires Space B's own PIN
+                        // (entered on-device) to correctly locate its files. Prompt
+                        // on device instead of wiping immediately.
+                        LOG_INFO("WebServer", "🚇 TUNNELED: Hidden space removal requested from Space A - will prompt on device");
                             
-                            if (!crypto.wipeHiddenSpace()) {
-                                LOG_ERROR("WebServer", "🚇 TUNNELED: Failed to wipe hidden space");
-                                String errorResp = "{\"error\":\"wipe_failed\"}";
-                                WebServerSecureIntegration::sendSecureResponse(request, 500, "application/json", errorResp, secureLayer);
-                                return;
-                            }
+                            extern bool shouldPromptRemoveHiddenSpace;
+                            shouldPromptRemoveHiddenSpace = true;
                             
                             JsonDocument resp;
-                            resp["status"] = "wiped_rebooting";
+                            resp["status"] = "prompt_on_device";
+                            resp["success"] = true;
+                            resp["message"] = "Please enter Space B PIN on device to confirm. Check device screen.";
                             String out;
                             serializeJson(resp, out);
                             
                             WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", out, secureLayer);
-                            
-                            delay(500);
-                            ESP.restart();
                             return;
                         
                     } else if (action == "set_share_wifi") {
@@ -7485,11 +7127,6 @@ void WebServerManager::start() {
                 
                 // 🎯 МАРШРУТИЗАЦИЯ: /api/ble_pin_update POST
                 if (targetEndpoint == "/api/ble_pin_update" && targetMethod == "POST") {
-                    // DEBUG: Логируем весь targetData
-                    String targetDataDebug;
-                    serializeJson(targetData, targetDataDebug);
-                    LOG_DEBUG("WebServer", "🚇 [TUNNELED] targetData JSON: " + targetDataDebug);
-                    
                     // Новая логика: поддержка двух типов PIN
                     String deviceBlePinStr = targetData["device_ble_pin"].as<String>();
                     String deviceBlePinEnabledStr = targetData["device_ble_pin_enabled"].as<String>();
@@ -7577,6 +7214,15 @@ void WebServerManager::start() {
                 }
 
                 if (targetEndpoint == "/api/duress_pin_update" && targetMethod == "POST") {
+                    if (!CryptoManager::getInstance().isDeviceKeyEncrypted()) {
+                        JsonDocument guardDoc;
+                        guardDoc["success"] = false;
+                        guardDoc["message"] = "Duress PIN requires Startup PIN to be enabled first";
+                        String guardResponse;
+                        serializeJson(guardDoc, guardResponse);
+                        WebServerSecureIntegration::sendSecureResponse(request, 400, "application/json", guardResponse, secureLayer);
+                        return;
+                    }
                     String dpStr   = targetData["duress_pin"].as<String>();
                     String dpEnStr = targetData["duress_pin_enabled"].as<String>();
                     bool dpEnabled = (dpEnStr == "true");
@@ -7613,6 +7259,43 @@ void WebServerManager::start() {
                         WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
                     } else {
                         String output = "{\"success\":false,\"message\":\"BLE manager not available\"}";
+                        WebServerSecureIntegration::sendSecureResponse(request, 500, "application/json", output, secureLayer);
+                    }
+                    return;
+                }
+                
+                // 🎯 МАРШРУТИЗАЦИЯ: /api/enter_import_export_mode POST
+                if (targetEndpoint == "/api/enter_import_export_mode" && targetMethod == "POST") {
+                    LOG_INFO("WebServer", "🚇 TUNNELED Enter import/export mode request");
+                    
+                    String password = targetData["password"].as<String>();
+                    if (password.isEmpty()) {
+                        secureWipeString(password);
+                        String output = "{\"error\":\"password_required\"}";
+                        WebServerSecureIntegration::sendSecureResponse(request, 400, "application/json", output, secureLayer);
+                        return;
+                    }
+                    bool verified = WebAdminManager::getInstance().verifyCredentials(WebAdminManager::getInstance().getUsername(), password);
+                    secureWipeString(password);
+                    if (!verified) {
+                        LOG_WARNING("WebServer", "🚇 TUNNELED Enter restricted mode failed: invalid admin password.");
+                        String output = "{\"error\":\"invalid_password\"}";
+                        WebServerSecureIntegration::sendSecureResponse(request, 401, "application/json", output, secureLayer);
+                        return;
+                    }
+                    
+                    File flagFile = LittleFS.open("/.setup_import_export", "w");
+                    if (flagFile) {
+                        ActiveSpace requestingSpace = CryptoManager::getInstance().getActiveSpace();
+                        flagFile.print(requestingSpace == ActiveSpace::B ? "B" : "A");
+                        flagFile.close();
+                        LOG_INFO("WebServer", "🚇 Import/export flag created via tunnel, rebooting...");
+                        String output = "{\"status\":\"rebooting\"}";
+                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
+                        delay(500);
+                        secureRestart();
+                    } else {
+                        String output = "{\"error\":\"failed_to_create_flag\"}";
                         WebServerSecureIntegration::sendSecureResponse(request, 500, "application/json", output, secureLayer);
                     }
                     return;
@@ -7950,7 +7633,7 @@ void WebServerManager::start() {
                         LOG_INFO("WebServer", "AP password changed successfully - scheduling restart");
                         WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
                         delay(3000);
-                        ESP.restart();
+                        secureRestart();
                     } else {
                         return request->send(500, "application/json", "{\"success\":false,\"error\":\"Failed to save new AP password.\"}");
                     }
@@ -7966,7 +7649,7 @@ void WebServerManager::start() {
                     WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
                     
                     delay(1000);
-                    ESP.restart();
+                    secureRestart();
                     return;
                 }
                 
@@ -7982,7 +7665,7 @@ void WebServerManager::start() {
                     WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
                     
                     delay(1000);
-                    ESP.restart();
+                    secureRestart();
                     return;
                 }
                 
@@ -8136,7 +7819,7 @@ void WebServerManager::start() {
                         if (request->hasHeader("X-User-Activity")) resetActivityTimer();
                         JsonDocument doc;
                         JsonArray keysArray = doc.to<JsonArray>();
-                        auto keys = keyManager.getAllKeys();
+                        const auto& keys = keyManager.getAllKeys();
                         
                         // 🔐 Блокировка TOTP в AP/Offline режимах
                         bool blockTOTP = !totpGenerator.isTimeSynced();
@@ -8284,7 +7967,7 @@ void WebServerManager::start() {
                     if (targetEndpoint == "/api/show_qr" && targetMethod == "POST") {
                         int keyIndex = targetData["key_id"].as<int>();
                         
-                        auto keys = keyManager.getAllKeys();
+                        const auto& keys = keyManager.getAllKeys();
                         if (keyIndex < 0 || keyIndex >= keys.size()) {
                             LOG_ERROR("WebServer", "🔗 OBFUSCATED SHOW_QR: Invalid key index: " + String(keyIndex));
                             String output = "{\"error\":\"Key not found\"}";
@@ -8350,7 +8033,7 @@ void WebServerManager::start() {
                     if (targetEndpoint == "/api/hotp/generate" && targetMethod == "POST") {
                         int index = targetData["index"].as<int>();
                         
-                        auto keys = keyManager.getAllKeys();
+                        const auto& keys = keyManager.getAllKeys();
                         if (index < 0 || index >= keys.size()) {
                             if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
                             return request->send(400, "text/plain", "Invalid key index");
@@ -8368,7 +8051,7 @@ void WebServerManager::start() {
                             return request->send(500, "text/plain", "Failed to increment HOTP counter");
                         }
                         
-                        auto updatedKeys = keyManager.getAllKeys();
+                        const auto& updatedKeys = keyManager.getAllKeys();
                         String newCode = totpGenerator.generateCode(updatedKeys[index]);
                         
                         // 🛡️ Ручное формирование JSON
@@ -8422,40 +8105,9 @@ void WebServerManager::start() {
                         return;
                     }
                     
-                    // /api/enable_import_export POST
-                    if (targetEndpoint == "/api/enable_import_export" && targetMethod == "POST") {
-                        if (request->hasHeader("X-User-Activity")) resetActivityTimer();
-                        
-                        WebAdminManager::getInstance().enableApi();
-                        LOG_INFO("WebServer", "🚇 OBFUSCATED API access enabled");
-                        
-                        String output = "{\"status\":\"success\",\"message\":\"API access enabled for 5 minutes\"}";
-                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
-                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                        return;
-                    }
+
                     
-                    // /api/import_export_status GET
-                    if (targetEndpoint == "/api/import_export_status" && targetMethod == "GET") {
-                        if (request->hasHeader("X-User-Activity")) resetActivityTimer();
-                        
-                        bool isEnabled = WebAdminManager::getInstance().isApiEnabled();
-                        int remaining = WebAdminManager::getInstance().getApiTimeRemaining();
-                        
-                        LOG_INFO("WebServer", "🚇 OBFUSCATED API status: " + String(isEnabled ? "enabled" : "disabled") + ", remaining: " + String(remaining) + "s");
-                        
-                        String output;
-                        output.reserve(60);
-                        output = "{\"enabled\":";
-                        output += isEnabled ? "true" : "false";
-                        output += ",\"remaining\":";
-                        output += String(remaining);
-                        output += "}";
-                        
-                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
-                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                        return;
-                    }
+
                     
                     // /api/ble_settings GET
                     if (targetEndpoint == "/api/ble_settings" && targetMethod == "GET") {
@@ -8899,11 +8551,11 @@ void WebServerManager::start() {
                             DateTime now = rtcManager.getCurrentTime();
                             char iso[25];
                             time_t utc_ts = now.unixtime();
-                            struct tm localTm;
-                            localtime_r(&utc_ts, &localTm);
-                            snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02d:%02d:%02d",
-                                     localTm.tm_year + 1900, localTm.tm_mon + 1, localTm.tm_mday,
-                                     localTm.tm_hour, localTm.tm_min, localTm.tm_sec);
+                            struct tm utcTm;
+                            gmtime_r(&utc_ts, &utcTm);
+                            snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02d:%02d:%02dZ",
+                                     utcTm.tm_year + 1900, utcTm.tm_mon + 1, utcTm.tm_mday,
+                                     utcTm.tm_hour, utcTm.tm_min, utcTm.tm_sec);
                             doc["rtc_time"] = iso;
                         } else {
                             doc["rtc_time"] = nullptr;
@@ -9504,6 +9156,11 @@ void WebServerManager::start() {
                                 statusCode = 200;
                                 success = false;
                                 LOG_INFO("WebServer", "🔗 Obfuscated: PIN protection already disabled");
+                            } else if (CryptoManager::getInstance().isHiddenSpaceProvisioned()) {
+                                message = "Cannot disable PIN: Hidden Space is still active. Remove Hidden Space first.";
+                                statusCode = 400;
+                                success = false;
+                                LOG_WARNING("WebServer", "🔗 Obfuscated: PIN disable blocked: Hidden Space provisioned - refusing before device prompt");
                             } else {
                                 // Новая логика: устанавливаем глобальный флаг для запроса PIN на устройстве
                                 LOG_INFO("WebServer", "🔗 Obfuscated: PIN disable requested - will prompt on device");
@@ -9545,11 +9202,6 @@ void WebServerManager::start() {
                     
                     // /api/ble_pin_update POST
                     if (targetEndpoint == "/api/ble_pin_update" && targetMethod == "POST") {
-                        // DEBUG: Логируем весь targetData
-                        String targetDataDebug;
-                        serializeJson(targetData, targetDataDebug);
-                        LOG_DEBUG("WebServer", "🔗 [OBFUSCATED] targetData JSON: " + targetDataDebug);
-                        
                         // Новая логика: поддержка двух типов PIN
                         String deviceBlePinStr = targetData["device_ble_pin"].as<String>();
                         String deviceBlePinEnabledStr = targetData["device_ble_pin_enabled"].as<String>();
@@ -9637,6 +9289,16 @@ void WebServerManager::start() {
                     }
 
                     if (targetEndpoint == "/api/duress_pin_update" && targetMethod == "POST") {
+                        if (!CryptoManager::getInstance().isDeviceKeyEncrypted()) {
+                            JsonDocument guardDoc;
+                            guardDoc["success"] = false;
+                            guardDoc["message"] = "Duress PIN requires Startup PIN to be enabled first";
+                            String guardResponse;
+                            serializeJson(guardDoc, guardResponse);
+                            WebServerSecureIntegration::sendSecureResponse(request, 400, "application/json", guardResponse, secureLayer);
+                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                            return;
+                        }
                         String dpStr   = targetData["duress_pin"].as<String>();
                         String dpEnStr = targetData["duress_pin_enabled"].as<String>();
                         bool dpEnabled = (dpEnStr == "true");
@@ -9753,7 +9415,7 @@ void WebServerManager::start() {
                             WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", output, secureLayer);
                             if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
                             delay(3000);
-                            ESP.restart();
+                            secureRestart();
                         } else {
                             if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
                             return request->send(500, "application/json", "{\"success\":false,\"error\":\"Failed to save new AP password.\"}");
@@ -9785,7 +9447,7 @@ void WebServerManager::start() {
                         }
                         
                         LOG_DEBUG("WebServer", "🔗 Obfuscated passwords list request");
-                        auto passwords = passwordManager.getAllPasswords();
+                        const auto& passwords = passwordManager.getAllPasswords();
                         
                         JsonDocument doc;
                         JsonArray array = doc.to<JsonArray>();
@@ -9796,7 +9458,13 @@ void WebServerManager::start() {
                             obj["strength"] = entry.strength;
                             obj["pw_hash"] = entry.pw_hash;
                             obj["category"]  = entry.category;
-                            obj["auto_send"] = entry.auto_send;
+                            obj["auto_send"] = entry.getAutoSend();
+                            obj["send_login"] = entry.getSendLogin();
+                            obj["login"] = entry.login;
+                            obj["nav_mode"] = entry.nav_mode;
+                            obj["login_delay_ms"] = entry.login_delay_ms;
+                            obj["wildcard"] = entry.getWildcard();
+                            obj["wildcard_len"] = entry.wildcard_len;
                         }
                         String output;
                         serializeJson(doc, output);
@@ -9819,11 +9487,32 @@ void WebServerManager::start() {
                         JsonVariant _as = targetData["auto_send"];
                         bool autoSend = (!_as.isNull() && (_as.as<bool>() || _as.as<String>() == "1" || _as.as<String>() == "true"));
                         
-                        String _dbgJson; serializeJson(targetData, _dbgJson);
-                        LOG_DEBUG("WebServer", "ADD targetData raw: " + _dbgJson);
+                        String login = targetData["login"] | "";
+                        String navMode = targetData["nav_mode"] | "enter";
+                        int loginDelayMs = 300;
+                        if (!targetData["login_delay_ms"].isNull()) {
+                            loginDelayMs = targetData["login_delay_ms"].as<String>().toInt();
+                            if (loginDelayMs <= 0) loginDelayMs = 300;
+                        }
+                        JsonVariant _sl = targetData["send_login"];
+                        bool sendLogin = (!_sl.isNull() && (_sl.as<bool>() || _sl.as<String>() == "1" || _sl.as<String>() == "true"));
+                        JsonVariant _wc = targetData["wildcard"];
+                        bool wildcardVal = (!_wc.isNull() && (_wc.as<bool>() || _wc.as<String>() == "1" || _wc.as<String>() == "true"));
+                        int wildcardLenVal = 16;
+                        if (!targetData["wildcard_len"].isNull()) {
+                            wildcardLenVal = targetData["wildcard_len"].as<String>().toInt();
+                            if (wildcardLenVal <= 0) wildcardLenVal = 16;
+                        }
+                        if (wildcardVal) {
+                            // System-managed identity: never trust client-supplied
+                            // name/password for a wildcard entry.
+                            name = "random";
+                            password = "[wildcard]";
+                        }
+                        
                         LOG_INFO("WebServer", "🔗 Obfuscated Password add: " + name);
                         
-                        if (passwordManager.addPassword(name, password, category, autoSend)) {
+                        if (passwordManager.addPassword(name, password, category, autoSend, login, sendLogin, navMode, loginDelayMs, wildcardVal, wildcardLenVal)) {
                             LOG_INFO("WebServer", "🔗 Obfuscated Password added: " + name);
                             
                             JsonDocument responseDoc;
@@ -9895,7 +9584,7 @@ void WebServerManager::start() {
                         
                         LOG_INFO("WebServer", "🔗 Obfuscated Password get: index " + String(index));
                         
-                        auto passwords = passwordManager.getAllPasswords();
+                        const auto& passwords = passwordManager.getAllPasswords();
                         if (index >= 0 && index < passwords.size()) {
                             const auto& pwd = passwords[index];
                             
@@ -9903,7 +9592,11 @@ void WebServerManager::start() {
                             responseDoc["name"] = pwd.name;
                             responseDoc["password"] = pwd.password;
                             responseDoc["category"] = pwd.category;
-                            responseDoc["auto_send"] = pwd.auto_send;
+                            responseDoc["auto_send"] = pwd.getAutoSend();
+                            responseDoc["send_login"] = pwd.getSendLogin();
+                            responseDoc["login"] = pwd.login;
+                            responseDoc["nav_mode"] = pwd.nav_mode;
+                            responseDoc["login_delay_ms"] = pwd.login_delay_ms;
                             String jsonResponse;
                             serializeJson(responseDoc, jsonResponse);
                             
@@ -9937,9 +9630,39 @@ void WebServerManager::start() {
                         JsonVariant _as = targetData["auto_send"];
                         bool autoSend = (!_as.isNull() && (_as.as<bool>() || _as.as<String>() == "1" || _as.as<String>() == "true"));
                         
+                        String login = targetData["login"] | "";
+                        String navMode = targetData["nav_mode"] | "enter";
+                        int loginDelayMs = 300;
+                        if (!targetData["login_delay_ms"].isNull()) {
+                            loginDelayMs = targetData["login_delay_ms"].as<String>().toInt();
+                            if (loginDelayMs <= 0) loginDelayMs = 300;
+                        }
+                        JsonVariant _sl = targetData["send_login"];
+                        bool sendLogin = (!_sl.isNull() && (_sl.as<bool>() || _sl.as<String>() == "1" || _sl.as<String>() == "true"));
+                        JsonVariant _wc = targetData["wildcard"];
+                        bool wildcardVal = (!_wc.isNull() && (_wc.as<bool>() || _wc.as<String>() == "1" || _wc.as<String>() == "true"));
+                        int wildcardLenVal = 16;
+                        if (!targetData["wildcard_len"].isNull()) {
+                            wildcardLenVal = targetData["wildcard_len"].as<String>().toInt();
+                            if (wildcardLenVal <= 0) wildcardLenVal = 16;
+                        }
+                        if (wildcardVal) {
+                            // System-managed identity: never trust client-supplied
+                            // name/password for a wildcard entry.
+                            // Guard: only override if the existing stored entry is already a
+                            // wildcard — a normal-entry edit must not be corrupted if a client
+                            // injects wildcard=1 (PasswordManager will reject the conversion
+                            // via its immutability guard, but we must not silently rename here).
+                            const auto& _pwds = passwordManager.getAllPasswords();
+                            if (index >= 0 && index < (int)_pwds.size() && _pwds[index].getWildcard()) {
+                                name = "random";
+                                password = "[wildcard]";
+                            }
+                        }
+                        
                         LOG_INFO("WebServer", "🔗 Obfuscated Password update: index " + String(index) + ", name: " + name);
                         
-                        if (passwordManager.updatePassword(index, name, password, category, autoSend)) {
+                        if (passwordManager.updatePassword(index, name, password, category, autoSend, login, sendLogin, navMode, loginDelayMs, false, wildcardLenVal)) {
                             LOG_INFO("WebServer", "🔗 Obfuscated Password updated at index: " + String(index));
                             
                             JsonDocument responseDoc;
@@ -10006,243 +9729,12 @@ void WebServerManager::start() {
                         return;
                     }
                     
-                    // /api/passwords/export POST
-                    if (targetEndpoint == "/api/passwords/export" && targetMethod == "POST") {
-                        if (!WebAdminManager::getInstance().isApiEnabled()) {
-                            LOG_WARNING("WebServer", "🔗 Obfuscated passwords export blocked: API disabled");
-                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                            return request->send(403, "text/plain", "API access for import/export is disabled.");
-                        }
-                        
-                        String password = targetData["password"].as<String>();
-                        
-                        if (password.isEmpty()) {
-                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                            return request->send(400, "text/plain", "Password cannot be empty");
-                        }
-                        
-                        if (!WebAdminManager::getInstance().verifyCredentials(WebAdminManager::getInstance().getUsername(), password)) {
-                            LOG_WARNING("WebServer", "🔗 Obfuscated passwords export failed: Invalid admin password");
-                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                            return request->send(401, "text/plain", "Invalid admin password.");
-                        }
-                        
-                        LOG_INFO("WebServer", "🔗 Obfuscated passwords export: Password verified");
-                        auto passwords = passwordManager.getAllPasswords();
-                        
-                        // 🛡️ Шаг 1: Сериализация паролей
-                        String plaintext;
-                        {
-                            JsonDocument doc;
-                            JsonArray array = doc.to<JsonArray>();
-                            for (const auto& entry : passwords) {
-                                JsonObject obj = array.add<JsonObject>();
-                                obj["name"] = entry.name;
-                                obj["password"] = entry.password;
-                                obj["strength"] = entry.strength;
-                                obj["pw_hash"] = entry.pw_hash;
-                                obj["category"]  = entry.category;
-                                obj["auto_send"] = entry.auto_send;
-                            }
-                            serializeJson(doc, plaintext);
-                            // JsonDocument автоматически освобождается здесь
-                        }
-                        
-                        LOG_DEBUG("WebServer", "📏 Passwords plaintext size: " + String(plaintext.length()) + " bytes");
-                        
-                        // 🛡️ Шаг 2: Шифрование
-                        String encryptedContent = CryptoManager::getInstance().encryptWithPassword(plaintext, password);
-                        plaintext.clear(); // Освобождаем память
-                        plaintext = String(); // Полная очистка
-                        
-                        LOG_DEBUG("WebServer", "🔐 Encrypted size: " + String(encryptedContent.length()) + " bytes");
-                        LOG_INFO("WebServer", "💾 OBFUSCATED PASSWORDS EXPORT: Sending encrypted file directly");
-                        
-                        // Файл уже зашифрован CryptoManager, отправляем напрямую
-                        // encryptedContent уже JSON формата {"salt":"...","iv":"...","ciphertext":"..."}
-                        
-                        LOG_DEBUG("WebServer", "📦 Encrypted content size: " + String(encryptedContent.length()) + " bytes");
-                        LOG_DEBUG("WebServer", "💾 Free heap before send: " + String(ESP.getFreeHeap()) + " bytes");
-                        
-                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", encryptedContent, secureLayer);
-                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                        return;
-                    }
                     
-                    // /api/passwords/import POST
-                    if (targetEndpoint == "/api/passwords/import" && targetMethod == "POST") {
-                        if (!WebAdminManager::getInstance().isApiEnabled()) {
-                            LOG_WARNING("WebServer", "🔗 Obfuscated passwords import blocked: API disabled");
-                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                            return request->send(403, "text/plain", "API access for import/export is disabled.");
-                        }
-                        
-                        String password = targetData["password"].as<String>();
-                        String fileContent = targetData["data"].as<String>();
-                        
-                        LOG_DEBUG("WebServer", "🔍 Obfuscated passwords import received:");
-                        LOG_DEBUG("WebServer", "  - Password length: " + String(password.length()));
-                        LOG_DEBUG("WebServer", "  - FileContent length: " + String(fileContent.length()));
-                        
-                        if (password.isEmpty() || fileContent.isEmpty()) {
-                            LOG_ERROR("WebServer", "❌ Obfuscated passwords import: Missing data");
-                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                            return request->send(400, "text/plain", "Missing password or file data.");
-                        }
-                        
-                        LOG_INFO("WebServer", "🔗 Obfuscated passwords import: Decrypting file content");
-                        String decryptedContent = CryptoManager::getInstance().decryptWithPassword(fileContent, password);
-                        
-                        if (decryptedContent.isEmpty()) {
-                            LOG_WARNING("WebServer", "🔗 Obfuscated passwords import failed: Decryption failed");
-                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                            return request->send(400, "text/plain", "Decryption failed. Wrong password or corrupt file.");
-                        }
-                        
-                        if (passwordManager.replaceAllPasswords(decryptedContent)) {
-                            LOG_INFO("WebServer", "🔗 Obfuscated passwords import: Passwords imported successfully");
-                            
-                            JsonDocument responseDoc;
-                            responseDoc["status"] = "success";
-                            responseDoc["message"] = "Import successful!";
-                            String jsonResponse;
-                            serializeJson(responseDoc, jsonResponse);
-                            
-                            LOG_INFO("WebServer", "🔐 OBFUSCATED PASSWORDS IMPORT: Securing response");
-                            WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", jsonResponse, secureLayer);
-                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                            return;
-                        } else {
-                            LOG_ERROR("WebServer", "🔗 Obfuscated passwords import failed: Failed to process passwords");
-                            
-                            JsonDocument errorDoc;
-                            errorDoc["status"] = "error";
-                            errorDoc["message"] = "Failed to process passwords after decryption.";
-                            String errorResponse;
-                            serializeJson(errorDoc, errorResponse);
-                            
-                            WebServerSecureIntegration::sendSecureResponse(request, 500, "application/json", errorResponse, secureLayer);
-                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                            return;
-                        }
-                    }
                     
-                    // /api/export POST
-                    if (targetEndpoint == "/api/export" && targetMethod == "POST") {
-                        if (!WebAdminManager::getInstance().isApiEnabled()) {
-                            LOG_WARNING("WebServer", "🔗 Obfuscated export blocked: API disabled");
-                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                            return request->send(403, "text/plain", "API access for import/export is disabled.");
-                        }
-                        
-                        String password = targetData["password"].as<String>();
-                        
-                        if (password.isEmpty()) {
-                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                            return request->send(400, "text/plain", "Password cannot be empty");
-                        }
-                        
-                        if (!WebAdminManager::getInstance().verifyCredentials(WebAdminManager::getInstance().getUsername(), password)) {
-                            LOG_WARNING("WebServer", "🔗 Obfuscated export failed: Invalid admin password");
-                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                            return request->send(401, "text/plain", "Invalid admin password.");
-                        }
-                        
-                        LOG_INFO("WebServer", "🔗 Obfuscated TOTP export: Password verified");
-                        auto keys = keyManager.getAllKeys();
-                        
-                        // 🛡️ Шаг 1: Сериализация TOTP ключей
-                        String plaintext;
-                        {
-                            JsonDocument doc;
-                            JsonArray array = doc.to<JsonArray>();
-                            for (const auto& key : keys) {
-                                JsonObject obj = array.add<JsonObject>();
-                                obj["name"] = key.name;
-                                obj["secret"] = key.secret;
-                                // Добавляем расширенные метаданные
-                                obj["type"] = (key.type == TOTPType::HOTP) ? "H" : "T";
-                                obj["algorithm"] = (key.algorithm == TOTPAlgorithm::SHA256) ? "256" :
-                                                   (key.algorithm == TOTPAlgorithm::SHA512) ? "512" : "1";
-                                obj["digits"] = key.digits;
-                                obj["period"] = key.period;
-                                if (key.counter != 0) {
-                                    obj["counter"] = key.counter;
-                                }
-                            }
-                            serializeJson(doc, plaintext);
-                            // JsonDocument автоматически освобождается здесь
-                        }
-                        
-                        LOG_DEBUG("WebServer", "📏 TOTP keys plaintext size: " + String(plaintext.length()) + " bytes");
-                        
-                        // 🛡️ Шаг 2: Шифрование
-                        String encryptedContent = CryptoManager::getInstance().encryptWithPassword(plaintext, password);
-                        plaintext.clear();
-                        plaintext = String();
-                        
-                        LOG_DEBUG("WebServer", "🔐 Encrypted size: " + String(encryptedContent.length()) + " bytes");
-                        LOG_INFO("WebServer", "💾 OBFUSCATED TOTP EXPORT: Sending encrypted file directly");
-                        
-                        // Файл уже зашифрован CryptoManager, отправляем напрямую
-                        // encryptedContent уже JSON формата {"salt":"...","iv":"...","ciphertext":"..."}
-                        
-                        LOG_DEBUG("WebServer", "📦 Encrypted content size: " + String(encryptedContent.length()) + " bytes");
-                        LOG_DEBUG("WebServer", "💾 Free heap before send: " + String(ESP.getFreeHeap()) + " bytes");
-                        
-                        WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", encryptedContent, secureLayer);
-                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                        return;
-                    }
+
                     
                     // /api/import POST
-                    if (targetEndpoint == "/api/import" && targetMethod == "POST") {
-                        if (!WebAdminManager::getInstance().isApiEnabled()) {
-                            LOG_WARNING("WebServer", "🔗 Obfuscated import blocked: API disabled");
-                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                            return request->send(403, "text/plain", "API access for import/export is disabled.");
-                        }
-                        
-                        String password = targetData["password"].as<String>();
-                        String fileContent = targetData["data"].as<String>();
-                        
-                        LOG_DEBUG("WebServer", "🔍 Obfuscated import received:");
-                        LOG_DEBUG("WebServer", "  - Password length: " + String(password.length()));
-                        LOG_DEBUG("WebServer", "  - FileContent length: " + String(fileContent.length()));
-                        
-                        if (password.isEmpty() || fileContent.isEmpty()) {
-                            LOG_ERROR("WebServer", "❌ Obfuscated import: Missing data");
-                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                            return request->send(400, "text/plain", "Missing password or file data.");
-                        }
-                        
-                        LOG_INFO("WebServer", "🔗 Obfuscated TOTP import: Decrypting file content");
-                        String decryptedContent = CryptoManager::getInstance().decryptWithPassword(fileContent, password);
-                        
-                        if (decryptedContent.isEmpty()) {
-                            LOG_WARNING("WebServer", "🔗 Obfuscated import failed: Decryption failed");
-                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                            return request->send(400, "text/plain", "Decryption failed. Wrong password or corrupt file.");
-                        }
-                        
-                        if (keyManager.replaceAllKeys(decryptedContent)) {
-                            LOG_INFO("WebServer", "🔗 Obfuscated TOTP import: Keys imported successfully");
-                            
-                            String jsonResponse = "{\"status\":\"success\",\"message\":\"Import successful!\"}";
-                            
-                            LOG_INFO("WebServer", "🔐 OBFUSCATED IMPORT: Securing response");
-                            WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", jsonResponse, secureLayer);
-                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                            return;
-                        } else {
-                            LOG_ERROR("WebServer", "🔗 Obfuscated import failed: Failed to process keys");
-                            
-                            String errorResponse = "{\"status\":\"error\",\"message\":\"Failed to process keys after decryption.\"}";
-                            WebServerSecureIntegration::sendSecureResponse(request, 500, "application/json", errorResponse, secureLayer);
-                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                            return;
-                        }
-                    }
+
                     
                     // /api/reboot POST
                     if (targetEndpoint == "/api/reboot" && targetMethod == "POST") {
@@ -10254,7 +9746,7 @@ void WebServerManager::start() {
                         if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
                         
                         delay(1000);
-                        ESP.restart();
+                        secureRestart();
                         return;
                     }
                     
@@ -10271,7 +9763,7 @@ void WebServerManager::start() {
                         if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
                         
                         delay(1000);
-                        ESP.restart();
+                        secureRestart();
                         return;
                     }
                     
@@ -10294,6 +9786,47 @@ void WebServerManager::start() {
                         
                         WebServerSecureIntegration::sendSecureResponse(request, success ? 200 : 500, "application/json", responseMsg, secureLayer);
                         if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                        return;
+                    }
+                    
+                    // /api/enter_import_export_mode POST
+                    if (targetEndpoint == "/api/enter_import_export_mode" && targetMethod == "POST") {
+                        LOG_INFO("WebServer", "🔗 Obfuscated enter_import_export_mode request");
+                        
+                        String password = targetData["password"].as<String>();
+                        if (password.isEmpty()) {
+                            secureWipeString(password);
+                            String responseMsg = "{\"error\":\"password_required\"}";
+                            WebServerSecureIntegration::sendSecureResponse(request, 400, "application/json", responseMsg, secureLayer);
+                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                            return;
+                        }
+                        bool verified = WebAdminManager::getInstance().verifyCredentials(WebAdminManager::getInstance().getUsername(), password);
+                        secureWipeString(password);
+                        if (!verified) {
+                            LOG_WARNING("WebServer", "🔗 Obfuscated enter restricted mode failed: invalid admin password.");
+                            String responseMsg = "{\"error\":\"invalid_password\"}";
+                            WebServerSecureIntegration::sendSecureResponse(request, 401, "application/json", responseMsg, secureLayer);
+                            if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                            return;
+                        }
+                        
+                        File flagFile = LittleFS.open("/.setup_import_export", "w");
+                        bool success = false;
+                        String responseMsg;
+                        if (flagFile) {
+                            ActiveSpace requestingSpace = CryptoManager::getInstance().getActiveSpace();
+                            flagFile.print(requestingSpace == ActiveSpace::B ? "B" : "A");
+                            flagFile.close();
+                            success = true;
+                            responseMsg = "{\"status\":\"rebooting\"}";
+                        } else {
+                            responseMsg = "{\"error\":\"failed_to_create_flag\"}";
+                        }
+                        
+                        WebServerSecureIntegration::sendSecureResponse(request, success ? 200 : 500, "application/json", responseMsg, secureLayer);
+                        if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                        if (success) { delay(500); secureRestart(); }
                         return;
                     }
                     
@@ -10372,6 +9905,14 @@ void WebServerManager::start() {
                                 return;
                             }
                             
+                            if (!crypto.isDeviceKeyEncrypted()) {
+                                LOG_WARNING("WebServer", "🔗 Obfuscated: Hidden space enable blocked: Startup PIN is not enabled");
+                                String errorResp = "{\"error\":\"pin_required\",\"message\":\"Enable Startup PIN before creating Hidden Space\"}";
+                                WebServerSecureIntegration::sendSecureResponse(request, 400, "application/json", errorResp, secureLayer);
+                                if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
+                                return;
+                            }
+                            
                             // Create setup flag file
                             File flagFile = LittleFS.open("/.setup_hidden_space", "w");
                             if (!flagFile) {
@@ -10395,7 +9936,7 @@ void WebServerManager::start() {
                             if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
                             
                             delay(500);
-                            ESP.restart();
+                            secureRestart();
                             return;
                             
                         } else if (action == "disable") {
@@ -10416,27 +9957,23 @@ void WebServerManager::start() {
                                 return;
                             }
                             
-                            // Wipe from Space A - allowed
-                            LOG_INFO("WebServer", "🔗 Obfuscated: Disabling hidden space from Space A");
+                            // Wipe from Space A - allowed, but requires Space B's own PIN
+                            // (entered on-device) to correctly locate its files. Prompt
+                            // on device instead of wiping immediately.
+                            LOG_INFO("WebServer", "🔗 Obfuscated: Hidden space removal requested from Space A - will prompt on device");
                                 
-                                if (!crypto.wipeHiddenSpace()) {
-                                    LOG_ERROR("WebServer", "🔗 Obfuscated: Failed to wipe hidden space");
-                                    String errorResp = "{\"error\":\"wipe_failed\"}";
-                                    WebServerSecureIntegration::sendSecureResponse(request, 500, "application/json", errorResp, secureLayer);
-                                    if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                                    return;
-                                }
+                                extern bool shouldPromptRemoveHiddenSpace;
+                                shouldPromptRemoveHiddenSpace = true;
                                 
                                 JsonDocument resp;
-                                resp["status"] = "wiped_rebooting";
+                                resp["status"] = "prompt_on_device";
+                                resp["success"] = true;
+                                resp["message"] = "Please enter Space B PIN on device to confirm. Check device screen.";
                                 String out;
                                 serializeJson(resp, out);
                                 
                                 WebServerSecureIntegration::sendSecureResponse(request, 200, "application/json", out, secureLayer);
                                 if (bufferPtr) { delete bufferPtr; request->_tempObject = nullptr; }
-                                
-                                delay(500);
-                                ESP.restart();
                                 return;
                             
                         } else if (action == "set_share_wifi") {
@@ -10841,7 +10378,7 @@ void WebServerManager::startConfigServer() {
                     LOG_INFO("WebServer", "WiFi credentials saved successfully (encrypted)");
                     request->send(200, "text/plain", "Credentials saved. Rebooting...");
                     delay(1000);
-                    ESP.restart();
+                    secureRestart();
                 } else {
                     LOG_ERROR("WebServer", "Failed to save WiFi credentials");
                     request->send(500, "text/plain", "Failed to save credentials. Please try again.");
@@ -10991,3 +10528,516 @@ void WebServerManager::resetActivityTimer() {
 // Note: generateKeysTable and generatePasswordsTable are no longer needed as the frontend is now JS-based.
 String WebServerManager::generateKeysTable() { return ""; }
 String WebServerManager::generatePasswordsTable() { return ""; }
+
+// ============================================================================
+// Restricted Import/Export Mode — Request-Agnostic Core Logic
+// ============================================================================
+// These methods contain ONLY the serialization, encryption, decryption, and
+// manager interaction logic. They do NOT perform authentication, CSRF checks,
+// API-enabled checks, or session validation — those are the responsibility of
+// the caller (either ordinary /api/* handlers with full security, or restricted
+// mode handlers with simplified validation).
+
+String WebServerManager::exportKeysEncryptedRestricted(const String& password) {
+    const auto& keys = keyManager.getAllKeys();
+    JsonDocument doc;
+    JsonArray array = doc.to<JsonArray>();
+    for (const auto& key : keys) {
+        JsonObject obj = array.add<JsonObject>();
+        obj["name"] = key.name;
+        obj["secret"] = key.secret;
+        obj["type"] = (key.type == TOTPType::HOTP) ? "H" : "T";
+        obj["algorithm"] = (key.algorithm == TOTPAlgorithm::SHA256) ? "256" :
+                           (key.algorithm == TOTPAlgorithm::SHA512) ? "512" : "1";
+        obj["digits"] = key.digits;
+        obj["period"] = key.period;
+        if (key.counter != 0) {
+            obj["counter"] = key.counter;
+        }
+    }
+    String plaintext;
+    serializeJson(doc, plaintext);
+    String encrypted = CryptoManager::getInstance().encryptWithPassword(plaintext, password);
+    secureWipeString(plaintext);
+    return encrypted;
+}
+
+bool WebServerManager::importKeysEncryptedRestricted(const String& fileContent, const String& password, String& errorOut) {
+    String decryptedContent = CryptoManager::getInstance().decryptWithPassword(fileContent, password);
+    if (decryptedContent.isEmpty()) {
+        errorOut = "Decryption failed. Wrong password or corrupt file.";
+        return false;
+    }
+    
+    // Schema validation: verify this is actually a TOTP keys export
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, decryptedContent);
+    if (error) {
+        secureWipeString(decryptedContent);
+        errorOut = "Invalid JSON structure after decryption.";
+        return false;
+    }
+    JsonArray array = doc.as<JsonArray>();
+    if (array.size() == 0) {
+        secureWipeString(decryptedContent);
+        errorOut = "This file does not look like a TOTP keys export (empty array) — wrong file selected?";
+        return false;
+    }
+    for (JsonObject obj : array) {
+        if (!obj.containsKey("secret")) {
+            secureWipeString(decryptedContent);
+            errorOut = "This file does not look like a TOTP keys export (missing 'secret' field) — wrong file selected?";
+            return false;
+        }
+    }
+    
+    bool success = keyManager.replaceAllKeys(decryptedContent);
+    secureWipeString(decryptedContent);
+    if (!success) {
+        errorOut = "Failed to process keys after decryption.";
+        return false;
+    }
+    return true;
+}
+
+String WebServerManager::exportPasswordsEncryptedRestricted(const String& password) {
+    auto passwords = passwordManager.getAllPasswordsForExport();
+    JsonDocument doc;
+    JsonArray array = doc.to<JsonArray>();
+    for (const auto& entry : passwords) {
+        JsonObject obj = array.add<JsonObject>();
+        obj["name"] = entry.name;
+        obj["password"] = entry.password;
+        obj["strength"] = entry.strength;
+        obj["pw_hash"] = entry.pw_hash;
+        obj["category"] = entry.category;
+        obj["auto_send"] = entry.getAutoSend();
+        obj["send_login"] = entry.getSendLogin();
+        obj["login"] = entry.login;
+        obj["nav_mode"] = entry.nav_mode;
+        obj["login_delay_ms"] = entry.login_delay_ms;
+        obj["wildcard"] = entry.getWildcard();
+        obj["wildcard_len"] = entry.wildcard_len;
+    }
+    String plaintext;
+    serializeJson(doc, plaintext);
+    String encrypted = CryptoManager::getInstance().encryptWithPassword(plaintext, password);
+    secureWipeString(plaintext);
+    return encrypted;
+}
+
+bool WebServerManager::importPasswordsEncryptedRestricted(const String& fileContent, const String& password, String& errorOut) {
+    String decryptedContent = CryptoManager::getInstance().decryptWithPassword(fileContent, password);
+    if (decryptedContent.isEmpty()) {
+        errorOut = "Decryption failed. Wrong password or corrupt file.";
+        return false;
+    }
+    
+    // Schema validation: verify this is actually a passwords export
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, decryptedContent);
+    if (error) {
+        secureWipeString(decryptedContent);
+        errorOut = "Invalid JSON structure after decryption.";
+        return false;
+    }
+    JsonArray array = doc.as<JsonArray>();
+    if (array.size() == 0) {
+        secureWipeString(decryptedContent);
+        errorOut = "This file does not look like a passwords export (empty array) — wrong file selected?";
+        return false;
+    }
+    for (JsonObject obj : array) {
+        if (!obj.containsKey("password")) {
+            secureWipeString(decryptedContent);
+            errorOut = "This file does not look like a passwords export (missing 'password' field) — wrong file selected?";
+            return false;
+        }
+    }
+    
+    bool success = passwordManager.replaceAllPasswords(decryptedContent);
+    secureWipeString(decryptedContent);
+    if (!success) {
+        errorOut = "Failed to process passwords after decryption.";
+        return false;
+    }
+    return true;
+}
+
+void WebServerManager::startRestrictedImportExportServer() {
+    // Captive portal detection routes — same convention as startConfigServer()
+    server.on("/generate_204", HTTP_GET, [](AsyncWebServerRequest *r){ r->redirect("http://192.168.4.1"); });
+    server.on("/hotspot-detect.html", HTTP_GET, [](AsyncWebServerRequest *r){ r->redirect("http://192.168.4.1"); });
+    server.on("/ncsi.txt", HTTP_GET, [](AsyncWebServerRequest *r){ r->redirect("http://192.168.4.1"); });
+    server.on("/fwlink", HTTP_GET, [](AsyncWebServerRequest *r){ r->redirect("http://192.168.4.1"); });
+    
+    // Minimal HTML page: two stacked blocks (TOTP keys, passwords),
+    // each with an export button (password field + download) and an
+    // import form (file + password). No auth/CSRF — gated entirely by
+    // closed AP + prior PIN unlock (see SPEC D16/Open Question 1).
+    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+        extern unsigned long lastRestrictedModeActivity;
+        lastRestrictedModeActivity = millis();
+        String html = R"rawliteral(
+<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Secure Import / Export</title>
+<style>
+    @keyframes gradient-animation {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+    }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background: linear-gradient(-45deg, #1a1a2e, #16213e, #0f3460, #2e4a62);
+        background-size: 400% 400%;
+        animation: gradient-animation 15s ease infinite;
+        color: #e0e0e0;
+        margin: 0;
+        padding: 20px 12px 60px;
+    }
+    .form-container {
+        max-width: 480px;
+        margin: 20px auto;
+        padding: 25px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border-radius: 15px;
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    }
+    h2 { margin-top: 0; color: #ffffff; font-weight: 300; letter-spacing: 1px; }
+    h3 { color: #b0b0b0; font-size: 0.95rem; font-weight: 500; margin-bottom: 8px; }
+    label { display: block; margin-bottom: 0.4rem; color: #b0b0b0; font-size: 0.85rem; }
+    input {
+        width: 100%; padding: 0.8rem; margin-bottom: 12px;
+        background-color: rgba(0, 0, 0, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: #e0e0e0; border-radius: 8px; box-sizing: border-box;
+        transition: all 0.3s ease;
+    }
+    input:focus { outline: none; border-color: #5a9eee; box-shadow: 0 0 0 3px rgba(90, 158, 238, 0.3); }
+    button {
+        width: 100%; padding: 0.8rem; background-color: #5a9eee;
+        color: white; border: none; border-radius: 8px; cursor: pointer;
+        font-size: 1rem; font-weight: 600; transition: all 0.3s ease; margin-bottom: 8px;
+    }
+    button:hover { background-color: #4a8bdb; }
+    .danger-btn { background-color: #e74c3c; }
+    .danger-btn:hover { background-color: #c0392b; }
+    .lang-switcher { text-align: right; max-width: 480px; margin: 0 auto 10px; }
+    .lang-switcher select {
+        width: auto; padding: 6px 10px; margin: 0;
+        background-color: rgba(255,255,255,0.08); color: #e0e0e0;
+        border: 1px solid rgba(255,255,255,0.2); border-radius: 6px;
+    }
+    #msg { max-width: 480px; margin: 10px auto; text-align: center; color: #e57373; }
+    .hint { font-size: 0.8rem; color: #888; text-align: center; margin-top: 20px; }
+</style></head><body>
+
+<div class="lang-switcher">
+    <select id="lang-select" onchange="applyLang(this.value)">
+        <option value="en">EN</option>
+        <option value="ru">RU</option>
+        <option value="de">DE</option>
+        <option value="es">ES</option>
+        <option value="zh">ZH</option>
+    </select>
+</div>
+
+<div class="form-container">
+    <h2 data-i18n="restricted.title">Secure Import / Export</h2>
+
+    <h3 data-i18n="restricted.keys.title">TOTP Keys</h3>
+    <label data-i18n="restricted.keys.export_legend">Export</label>
+    <input id="ek_pw" type="password" data-i18n="restricted.keys.export_placeholder" data-i18n-attr="placeholder" placeholder="Encryption password (min 8 chars)">
+    <button onclick="doExport('/api/restricted/export_keys','ek_pw','totp_keys_backup.json')" data-i18n="restricted.keys.export_btn">Export Keys</button>
+    <label data-i18n="restricted.keys.import_legend">Import</label>
+    <input id="ik_file" type="file">
+    <input id="ik_pw" type="password" data-i18n="restricted.keys.import_placeholder" data-i18n-attr="placeholder" placeholder="Password">
+    <button onclick="doImport('/api/restricted/import_keys','ik_file','ik_pw')" data-i18n="restricted.keys.import_btn">Import Keys</button>
+</div>
+
+<div class="form-container">
+    <h3 data-i18n="restricted.passwords.title">Passwords</h3>
+    <label data-i18n="restricted.passwords.export_legend">Export</label>
+    <input id="ep_pw" type="password" data-i18n="restricted.passwords.export_placeholder" data-i18n-attr="placeholder" placeholder="Encryption password (min 8 chars)">
+    <button onclick="doExport('/api/restricted/export_passwords','ep_pw','passwords_backup.json')" data-i18n="restricted.passwords.export_btn">Export Passwords</button>
+    <label data-i18n="restricted.passwords.import_legend">Import</label>
+    <input id="ip_file" type="file">
+    <input id="ip_pw" type="password" data-i18n="restricted.passwords.import_placeholder" data-i18n-attr="placeholder" placeholder="Password">
+    <button onclick="doImport('/api/restricted/import_passwords','ip_file','ip_pw')" data-i18n="restricted.passwords.import_btn">Import Passwords</button>
+</div>
+
+<div class="form-container">
+    <button class="danger-btn" onclick="closeSession()" data-i18n="restricted.close_session">Close Session</button>
+    <p id="msg"></p>
+    <p class="hint" data-i18n="restricted.footer_hint">Session ends automatically after inactivity or a fixed time limit.</p>
+</div>
+
+<script>
+const i18n = {
+  en: {
+    "restricted.title": "Secure Import / Export",
+    "restricted.keys.title": "TOTP Keys",
+    "restricted.keys.export_legend": "Export",
+    "restricted.keys.export_placeholder": "Encryption password (min 8 chars)",
+    "restricted.keys.export_btn": "Export Keys",
+    "restricted.keys.import_legend": "Import",
+    "restricted.keys.import_placeholder": "Password",
+    "restricted.keys.import_btn": "Import Keys",
+    "restricted.passwords.title": "Passwords",
+    "restricted.passwords.export_legend": "Export",
+    "restricted.passwords.export_placeholder": "Encryption password (min 8 chars)",
+    "restricted.passwords.export_btn": "Export Passwords",
+    "restricted.passwords.import_legend": "Import",
+    "restricted.passwords.import_placeholder": "Password",
+    "restricted.passwords.import_btn": "Import Passwords",
+    "restricted.close_session": "Close Session",
+    "restricted.footer_hint": "Session ends automatically after inactivity or a fixed time limit.",
+    "restricted.session_closing": "Session closing..."
+  },
+  ru: {
+    "restricted.title": "Безопасный импорт / экспорт",
+    "restricted.keys.title": "TOTP-ключи",
+    "restricted.keys.export_legend": "Экспорт",
+    "restricted.keys.export_placeholder": "Пароль шифрования (мин. 8 симв.)",
+    "restricted.keys.export_btn": "Экспортировать ключи",
+    "restricted.keys.import_legend": "Импорт",
+    "restricted.keys.import_placeholder": "Пароль",
+    "restricted.keys.import_btn": "Импортировать ключи",
+    "restricted.passwords.title": "Пароли",
+    "restricted.passwords.export_legend": "Экспорт",
+    "restricted.passwords.export_placeholder": "Пароль шифрования (мин. 8 симв.)",
+    "restricted.passwords.export_btn": "Экспортировать пароли",
+    "restricted.passwords.import_legend": "Импорт",
+    "restricted.passwords.import_placeholder": "Пароль",
+    "restricted.passwords.import_btn": "Импортировать пароли",
+    "restricted.close_session": "Закрыть сессию",
+    "restricted.footer_hint": "Сессия завершится автоматически при бездействии или по истечении лимита времени.",
+    "restricted.session_closing": "Сессия завершается..."
+  },
+  de: {
+    "restricted.title": "Sicherer Import / Export",
+    "restricted.keys.title": "TOTP-Schlüssel",
+    "restricted.keys.export_legend": "Export",
+    "restricted.keys.export_placeholder": "Verschlüsselungspasswort (mind. 8 Zeichen)",
+    "restricted.keys.export_btn": "Schlüssel exportieren",
+    "restricted.keys.import_legend": "Import",
+    "restricted.keys.import_placeholder": "Passwort",
+    "restricted.keys.import_btn": "Schlüssel importieren",
+    "restricted.passwords.title": "Passwörter",
+    "restricted.passwords.export_legend": "Export",
+    "restricted.passwords.export_placeholder": "Verschlüsselungspasswort (mind. 8 Zeichen)",
+    "restricted.passwords.export_btn": "Passwörter exportieren",
+    "restricted.passwords.import_legend": "Import",
+    "restricted.passwords.import_placeholder": "Passwort",
+    "restricted.passwords.import_btn": "Passwörter importieren",
+    "restricted.close_session": "Sitzung schließen",
+    "restricted.footer_hint": "Die Sitzung endet automatisch bei Inaktivität oder nach Ablauf der Zeitbegrenzung.",
+    "restricted.session_closing": "Sitzung wird beendet..."
+  },
+  es: {
+    "restricted.title": "Importación / Exportación segura",
+    "restricted.keys.title": "Claves TOTP",
+    "restricted.keys.export_legend": "Exportar",
+    "restricted.keys.export_placeholder": "Contraseña de cifrado (mín. 8 caracteres)",
+    "restricted.keys.export_btn": "Exportar claves",
+    "restricted.keys.import_legend": "Importar",
+    "restricted.keys.import_placeholder": "Contraseña",
+    "restricted.keys.import_btn": "Importar claves",
+    "restricted.passwords.title": "Contraseñas",
+    "restricted.passwords.export_legend": "Exportar",
+    "restricted.passwords.export_placeholder": "Contraseña de cifrado (mín. 8 caracteres)",
+    "restricted.passwords.export_btn": "Exportar contraseñas",
+    "restricted.passwords.import_legend": "Importar",
+    "restricted.passwords.import_placeholder": "Contraseña",
+    "restricted.passwords.import_btn": "Importar contraseñas",
+    "restricted.close_session": "Cerrar sesión",
+    "restricted.footer_hint": "La sesión finaliza automáticamente por inactividad o al alcanzar el límite de tiempo.",
+    "restricted.session_closing": "Cerrando sesión..."
+  },
+  zh: {
+    "restricted.title": "安全导入/导出",
+    "restricted.keys.title": "TOTP 密钥",
+    "restricted.keys.export_legend": "导出",
+    "restricted.keys.export_placeholder": "加密密码(最少8个字符)",
+    "restricted.keys.export_btn": "导出密钥",
+    "restricted.keys.import_legend": "导入",
+    "restricted.keys.import_placeholder": "密码",
+    "restricted.keys.import_btn": "导入密钥",
+    "restricted.passwords.title": "密码库",
+    "restricted.passwords.export_legend": "导出",
+    "restricted.passwords.export_placeholder": "加密密码(最少8个字符)",
+    "restricted.passwords.export_btn": "导出密码",
+    "restricted.passwords.import_legend": "导入",
+    "restricted.passwords.import_placeholder": "密码",
+    "restricted.passwords.import_btn": "导入密码",
+    "restricted.close_session": "关闭会话",
+    "restricted.footer_hint": "会话将在空闲或达到时间限制后自动结束。",
+    "restricted.session_closing": "会话正在关闭……"
+  }
+};
+
+let currentLang = "en";
+
+function tr(key) {
+    return (i18n[currentLang] && i18n[currentLang][key]) || i18n.en[key] || key;
+}
+
+function applyLang(lang) {
+    currentLang = lang;
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+        const val = tr(el.dataset.i18n);
+        if (el.getAttribute('data-i18n-attr') === 'placeholder') {
+            el.placeholder = val;
+        } else {
+            el.textContent = val;
+        }
+    });
+    const sel = document.getElementById('lang-select');
+    if (sel) sel.value = lang;
+}
+
+function doExport(url, pwId, filename){
+  const pw = document.getElementById(pwId).value;
+  const form = new URLSearchParams(); form.set('password', pw);
+  fetch(url, {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: form})
+    .then(r => { if(!r.ok) return r.text().then(t=>{throw new Error(t)}); return r.blob(); })
+    .then(blob => { const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; a.click(); })
+    .catch(e => document.getElementById('msg').innerText = 'Error: ' + e.message);
+}
+function doImport(url, fileId, pwId){
+  const file = document.getElementById(fileId).files[0];
+  const pw = document.getElementById(pwId).value;
+  if(!file){ document.getElementById('msg').innerText='Select a file first.'; return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({password: pw, data: reader.result})})
+      .then(r => r.text()).then(t => document.getElementById('msg').innerText = t)
+      .catch(e => document.getElementById('msg').innerText = 'Error: ' + e.message);
+  };
+  reader.readAsText(file);
+}
+function closeSession(){
+  fetch('/api/restricted/close_session', {method:'POST'})
+    .then(()=> document.getElementById('msg').innerText = tr('restricted.session_closing'));
+}
+
+applyLang('en');
+</script></body></html>
+)rawliteral";
+        request->send(200, "text/html; charset=UTF-8", html);
+    });
+
+    server.on("/api/restricted/export_keys", HTTP_POST, [this](AsyncWebServerRequest *request){
+        extern unsigned long lastRestrictedModeActivity;
+        lastRestrictedModeActivity = millis();
+        if (!request->hasParam("password", true)) {
+            return request->send(400, "text/plain", "Password is required.");
+        }
+        String password = request->getParam("password", true)->value();
+        if (password.length() < 8) {
+            secureWipeString(password);
+            return request->send(400, "text/plain", "Password must be at least 8 characters long.");
+        }
+        String encryptedContent = exportKeysEncryptedRestricted(password);
+        secureWipeString(password);
+        AsyncWebServerResponse *response = request->beginResponse(200, "application/json", encryptedContent);
+        response->addHeader("Content-Disposition", "attachment; filename=\"encrypted_keys_backup.json\"");
+        request->send(response);
+    });
+
+    server.on("/api/restricted/export_passwords", HTTP_POST, [this](AsyncWebServerRequest *request){
+        extern unsigned long lastRestrictedModeActivity;
+        lastRestrictedModeActivity = millis();
+        if (!request->hasParam("password", true)) {
+            return request->send(400, "text/plain", "Password is required.");
+        }
+        String password = request->getParam("password", true)->value();
+        if (password.length() < 8) {
+            secureWipeString(password);
+            return request->send(400, "text/plain", "Password must be at least 8 characters long.");
+        }
+        String encryptedContent = exportPasswordsEncryptedRestricted(password);
+        secureWipeString(password);
+        AsyncWebServerResponse *response = request->beginResponse(200, "application/json", encryptedContent);
+        response->addHeader("Content-Disposition", "attachment; filename=\"encrypted_passwords_backup.json\"");
+        request->send(response);
+    });
+
+    server.on("/api/restricted/import_keys", HTTP_POST, [this](AsyncWebServerRequest *request){
+        // handled in body callback
+    }, NULL, [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+        static String body;
+        if (index == 0) body = "";
+        body.concat((char*)data, len);
+        if (index + len < total) return;
+
+        extern unsigned long lastRestrictedModeActivity;
+        lastRestrictedModeActivity = millis();
+
+        JsonDocument doc;
+        if (deserializeJson(doc, body) != DeserializationError::Ok) {
+            return request->send(400, "text/plain", "Invalid JSON body.");
+        }
+        String password = doc["password"];
+        String fileContent = doc["data"];
+        if (password.isEmpty() || fileContent.isEmpty()) {
+            secureWipeString(password);
+            return request->send(400, "text/plain", "Missing password or file data.");
+        }
+        String errorOut;
+        bool success = importKeysEncryptedRestricted(fileContent, password, errorOut);
+        secureWipeString(password);
+        if (success) {
+            request->send(200, "text/plain", "Import successful!");
+        } else {
+            request->send(400, "text/plain", errorOut);
+        }
+    });
+
+    server.on("/api/restricted/import_passwords", HTTP_POST, [this](AsyncWebServerRequest *request){
+        // handled in body callback
+    }, NULL, [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+        static String body;
+        if (index == 0) body = "";
+        body.concat((char*)data, len);
+        if (index + len < total) return;
+
+        extern unsigned long lastRestrictedModeActivity;
+        lastRestrictedModeActivity = millis();
+
+        JsonDocument doc;
+        if (deserializeJson(doc, body) != DeserializationError::Ok) {
+            return request->send(400, "text/plain", "Invalid JSON body.");
+        }
+        String password = doc["password"];
+        String fileContent = doc["data"];
+        if (password.isEmpty() || fileContent.isEmpty()) {
+            secureWipeString(password);
+            return request->send(400, "text/plain", "Missing password or file data.");
+        }
+        String errorOut;
+        bool success = importPasswordsEncryptedRestricted(fileContent, password, errorOut);
+        secureWipeString(password);
+        if (success) {
+            request->send(200, "text/plain", "Import successful!");
+        } else {
+            request->send(400, "text/plain", errorOut);
+        }
+    });
+
+    server.on("/api/restricted/close_session", HTTP_POST, [](AsyncWebServerRequest *request){
+        extern bool importExportCompleted;
+        request->send(200, "text/plain", "Session closing.");
+        importExportCompleted = true;
+    });
+
+    server.onNotFound([](AsyncWebServerRequest *r){
+        r->send(404, "text/plain", "Not Found");
+    });
+
+    server.begin();
+}

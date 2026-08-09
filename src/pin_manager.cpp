@@ -147,9 +147,15 @@ void PinManager::updatePinScreen(int currentPosition, int currentDigit, const St
     int centerX = tft->width() / 2;
 
     // Обновляем только маску PIN-кода
+    // ⚠️ SECURITY: Always display MAX_PIN_LENGTH slots to prevent PIN length leakage
     String pinMask = "";
-    for (int i = 0; i < enteredPin.length(); i++) pinMask += "*";
-    for (int i = 0; i < (currentPinLength - enteredPin.length()); i++) pinMask += ".";
+    for (int i = 0; i < MAX_PIN_LENGTH; i++) {
+        if (i < enteredPin.length()) {
+            pinMask += "*";  // Filled slot (digit entered)
+        } else {
+            pinMask += ".";  // Empty slot
+        }
+    }
     
 #ifdef ARDUINO_LILYGO_T_DISPLAY_S3
     int starsY    = tft->height() / 2 - 18;

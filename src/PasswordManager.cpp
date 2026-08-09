@@ -89,10 +89,20 @@ uint8_t PasswordManager::computeStrength(const String& password) {
     return 1;                  // weak
 }
 
-bool PasswordManager::addPassword(const String& name, const String& password, const String& category, bool auto_send) {
+bool PasswordManager::addPassword(const String& name, const String& password, const String& category, 
+                                  bool auto_send, const String& login, bool send_login, const String& nav_mode, 
+                                  int login_delay_ms, bool wildcard, int wildcard_len) {
     if (name.isEmpty() || password.isEmpty()) {
         LOG_WARNING("PasswordManager", "Cannot add password with empty name or value");
         return false;
+    }
+    if (wildcard) {
+        for (const auto& pwd : passwords) {
+            if (pwd.getWildcard()) {
+                LOG_WARNING("PasswordManager", "Wildcard entry already exists, rejecting duplicate");
+                return false;
+            }
+        }
     }
     // Найти максимальный порядок для нового пароля
     int maxOrder = 0;
@@ -103,7 +113,13 @@ bool PasswordManager::addPassword(const String& name, const String& password, co
     newPassword.name = name;
     newPassword.password = password;
     newPassword.category = category;
-    newPassword.auto_send = auto_send;
+    newPassword.setAutoSend(auto_send);
+    newPassword.setSendLogin(send_login);
+    newPassword.login = login;
+    newPassword.nav_mode = nav_mode;
+    newPassword.login_delay_ms = login_delay_ms;
+    newPassword.setWildcard(wildcard);
+    newPassword.wildcard_len = wildcard_len;
     newPassword.order = maxOrder + 1;
     // Compute strength and hash before storing
     newPassword.strength = computeStrength(password);
@@ -117,10 +133,24 @@ bool PasswordManager::addPassword(const String& name, const String& password, co
     return success;
 }
 
-bool PasswordManager::updatePassword(int index, const String& name, const String& password, const String& category, bool auto_send) {
+bool PasswordManager::updatePassword(int index, const String& name, const String& password, const String& category, 
+                                     bool auto_send, const String& login, bool send_login, const String& nav_mode, 
+                                     int login_delay_ms, bool wildcard, int wildcard_len) {
     if (index < 0 || index >= passwords.size()) {
         LOG_WARNING("PasswordManager", "Invalid password index for update: " + String(index));
         return false;
+    }
+    if (passwords[index].getWildcard()) {
+        // Wildcard entries are system-managed: name/password/category/etc.
+        // are never user-editable. Only the generated-password length can
+        // be changed here.
+        passwords[index].wildcard_len = wildcard_len;
+        LOG_INFO("PasswordManager", "Updated wildcard entry length at index " + String(index));
+        bool wildcardSuccess = savePasswords();
+        if (!wildcardSuccess) {
+            LOG_ERROR("PasswordManager", "Failed to save passwords after wildcard length update");
+        }
+        return wildcardSuccess;
     }
     if (name.isEmpty() || password.isEmpty()) {
         LOG_WARNING("PasswordManager", "Cannot update password with empty name or value");
@@ -129,7 +159,17 @@ bool PasswordManager::updatePassword(int index, const String& name, const String
     passwords[index].name = name;
     passwords[index].password = password;
     passwords[index].category = category;
-    passwords[index].auto_send = auto_send;
+    passwords[index].setAutoSend(auto_send);
+    passwords[index].setSendLogin(send_login);
+    passwords[index].login = login;
+    passwords[index].nav_mode = nav_mode;
+    passwords[index].login_delay_ms = login_delay_ms;
+    // Wildcard status can only be set at creation time (addPassword).
+    // updatePassword() must never convert a normal entry into a
+    // wildcard entry, regardless of what the caller passes in.
+    // (passwords[index].getWildcard() is guaranteed false here — the
+    // wildcard-entry branch above already returned early otherwise.)
+    passwords[index].wildcard_len = wildcard_len;
     // Recompute strength and hash on update
     passwords[index].strength = computeStrength(password);
     passwords[index].pw_hash  = computePwHash(password);
@@ -157,11 +197,7 @@ bool PasswordManager::deletePassword(int index) {
     return success;
 }
 
-std::vector<PasswordEntry> PasswordManager::getAllPasswords() {
-    // Сортируем пароли по порядку перед возвратом
-    std::sort(passwords.begin(), passwords.end(), [](const PasswordEntry& a, const PasswordEntry& b) {
-        return a.order < b.order;
-    });
+const std::vector<PasswordEntry>& PasswordManager::getAllPasswords() const {
     return passwords;
 }
 
@@ -185,6 +221,11 @@ bool PasswordManager::reorderPasswords(const std::vector<std::pair<String, int>>
     }
     
     if (changed) {
+        // Сортируем пароли по порядку после изменения order
+        std::sort(passwords.begin(), passwords.end(), [](const PasswordEntry& a, const PasswordEntry& b) {
+            return a.order < b.order;
+        });
+        
         bool success = savePasswords();
         if (success) {
             LOG_INFO("PasswordManager", "Successfully reordered passwords");
@@ -244,10 +285,21 @@ std::vector<PasswordEntry> PasswordManager::getAllPasswordsForExport() {
         entry.order = obj["order"] | 0;
         entry.strength = obj["strength"] | 0;
         entry.pw_hash = obj["pw_hash"] | "";
-        entry.category  = obj["category"]  | "";  // backward-compat: old entries default to ""
-        entry.auto_send = obj["auto_send"] | false;
+        entry.category  = obj["category"]  | "";
+        entry.setAutoSend(obj["auto_send"] | false);
+        entry.setSendLogin(obj["send_login"] | false);
+        entry.login = obj["login"] | "";
+        entry.nav_mode = obj["nav_mode"] | "enter";
+        entry.login_delay_ms = obj["login_delay_ms"] | 300;
+        entry.setWildcard(obj["wildcard"] | false);
+        entry.wildcard_len = obj["wildcard_len"] | 16;
         exportPasswords.push_back(entry);
     }
+
+    // Сортируем пароли по порядку перед экспортом
+    std::sort(exportPasswords.begin(), exportPasswords.end(), [](const PasswordEntry& a, const PasswordEntry& b) {
+        return a.order < b.order;
+    });
 
     return exportPasswords;
 }
@@ -265,15 +317,35 @@ bool PasswordManager::replaceAllPasswords(const String& jsonContent) {
     passwords.clear();
     JsonArray array = doc.as<JsonArray>();
     int currentOrder = 0;
+    bool wildcardSeen = false;
+    int wildcardDowngraded = 0;
     for (JsonObject obj : array) {
         PasswordEntry entry;
         entry.name = obj["name"].as<String>();
         entry.password = obj["password"].as<String>();
-        entry.order = obj["order"] | currentOrder++;  // Используем существующий order или назначаем по порядку
+        entry.order = obj["order"] | currentOrder++;
         entry.strength = obj["strength"] | (uint8_t)0;
         entry.pw_hash  = obj["pw_hash"] | String("");
-        entry.category  = obj["category"]  | "";  // backward-compat: old entries default to ""
-        entry.auto_send = obj["auto_send"] | false;
+        entry.category  = obj["category"]  | "";
+        entry.setAutoSend(obj["auto_send"] | false);
+        entry.setSendLogin(obj["send_login"] | false);
+        entry.login = obj["login"] | "";
+        entry.nav_mode = obj["nav_mode"] | "enter";
+        entry.login_delay_ms = obj["login_delay_ms"] | 300;
+        bool wantsWildcard = obj["wildcard"] | false;
+        if (wantsWildcard && wildcardSeen) {
+            // Singleton constraint: an imported backup may contain
+            // more than one wildcard-flagged entry (crafted or
+            // corrupted file). Only the first is honored; subsequent
+            // ones are downgraded to normal entries rather than
+            // dropped, so no data is silently lost.
+            wantsWildcard = false;
+            wildcardDowngraded++;
+        } else if (wantsWildcard) {
+            wildcardSeen = true;
+        }
+        entry.setWildcard(wantsWildcard);
+        entry.wildcard_len = obj["wildcard_len"] | 16;
         // Recompute missing fields (handles legacy import files)
         if (entry.strength == 0 || entry.pw_hash.isEmpty()) {
             entry.strength = computeStrength(entry.password);
@@ -281,6 +353,14 @@ bool PasswordManager::replaceAllPasswords(const String& jsonContent) {
         }
         passwords.push_back(entry);
     }
+    if (wildcardDowngraded > 0) {
+        LOG_WARNING("PasswordManager", "Import contained " + String(wildcardDowngraded) + " extra wildcard-flagged entr(y/ies); downgraded to normal entries (singleton constraint)");
+    }
+
+    // Сортируем пароли по порядку после импорта
+    std::sort(passwords.begin(), passwords.end(), [](const PasswordEntry& a, const PasswordEntry& b) {
+        return a.order < b.order;
+    });
 
     // Сохраняем новый набор паролей, который будет автоматически зашифрован
     bool success = savePasswords();
@@ -336,15 +416,30 @@ bool PasswordManager::loadPasswords() {
     passwords.clear();
     JsonArray array = doc.as<JsonArray>();
     int currentOrder = 0;
+    int entryIndex = 0;
+    int skippedCount = 0;
     for (JsonObject obj : array) {
+        if (!obj["name"].is<String>() || !obj["password"].is<String>() ||
+            obj["name"].as<String>().isEmpty() || obj["password"].as<String>().isEmpty()) {
+            LOG_ERROR("PasswordManager", "Skipping corrupted password entry at index " + String(entryIndex) + " (missing/empty name or password)");
+            skippedCount++;
+            entryIndex++;
+            continue;
+        }
         PasswordEntry entry;
         entry.name = obj["name"].as<String>(); 
         entry.password = obj["password"].as<String>();
-        entry.order = obj["order"] | currentOrder++;  // Используем существующий order или назначаем по порядку
+        entry.order = obj["order"] | currentOrder++;
         entry.strength = obj["strength"] | 0;
         entry.pw_hash = obj["pw_hash"] | "";
-        entry.category  = obj["category"]  | "";  // backward-compat: old entries default to ""
-        entry.auto_send = obj["auto_send"] | false;
+        entry.category  = obj["category"]  | "";
+        entry.setAutoSend(obj["auto_send"] | false);
+        entry.setSendLogin(obj["send_login"] | false);
+        entry.login = obj["login"] | "";
+        entry.nav_mode = obj["nav_mode"] | "enter";
+        entry.login_delay_ms = obj["login_delay_ms"] | 300;
+        entry.setWildcard(obj["wildcard"] | false);
+        entry.wildcard_len = obj["wildcard_len"] | 16;
         // Migration: compute missing fields for legacy entries
         if (entry.strength == 0 || entry.pw_hash.isEmpty()) {
             entry.strength = computeStrength(entry.password);
@@ -352,7 +447,17 @@ bool PasswordManager::loadPasswords() {
             _needsSave = true;
         }
         passwords.push_back(entry);
+        entryIndex++;
     }
+    if (skippedCount > 0) {
+        LOG_ERROR("PasswordManager", "Password list loaded with " + String(skippedCount) + " corrupted entr" + (skippedCount == 1 ? "y" : "ies") + " skipped");
+        _needsSave = true;
+    }
+
+    // Сортируем пароли по порядку после загрузки
+    std::sort(passwords.begin(), passwords.end(), [](const PasswordEntry& a, const PasswordEntry& b) {
+        return a.order < b.order;
+    });
 
     LOG_INFO("PasswordManager", "Loaded " + String(passwords.size()) + " passwords successfully");
     return true;
@@ -371,7 +476,13 @@ bool PasswordManager::savePasswords() {
         obj["strength"] = entry.strength;
         obj["pw_hash"]  = entry.pw_hash;
         obj["category"]  = entry.category;
-        obj["auto_send"] = entry.auto_send;
+        obj["auto_send"] = entry.getAutoSend();
+        obj["send_login"] = entry.getSendLogin();
+        obj["login"] = entry.login;
+        obj["nav_mode"] = entry.nav_mode;
+        obj["login_delay_ms"] = entry.login_delay_ms;
+        obj["wildcard"] = entry.getWildcard();
+        obj["wildcard_len"] = entry.wildcard_len;
     }
 
     String jsonData;
@@ -415,6 +526,10 @@ void PasswordManager::wipePasswords() {
         volatile char* p = const_cast<volatile char*>(entry.password.c_str());
         for (size_t i = 0; i < entry.password.length(); i++) p[i] = 0;
         entry.password = "";
+        
+        volatile char* pLogin = const_cast<volatile char*>(entry.login.c_str());
+        for (size_t i = 0; i < entry.login.length(); i++) pLogin[i] = 0;
+        entry.login = "";
     }
     passwords.clear();
 }

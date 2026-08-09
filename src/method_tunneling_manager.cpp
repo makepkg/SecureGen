@@ -10,8 +10,6 @@ const char* MethodTunnelingManager::tunnelingEnabledEndpoints[] = {
     "/api/passwords/delete", // Delete passwords - КРИТИЧНО
     "/api/passwords/update", // Password updates - КРИТИЧНО
     "/api/passwords/reorder", // Password reordering - КРИТИЧНО
-    "/api/passwords/export", // Password export - КРИТИЧНО
-    "/api/passwords/import", // Password import - КРИТИЧНО
     // "/api/upload_splash" removed - custom splash upload disabled for security
     "/api/keys/add",       // Add TOTP keys
     "/api/keys/delete",    // Delete TOTP keys

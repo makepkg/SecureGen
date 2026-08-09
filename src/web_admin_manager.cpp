@@ -4,36 +4,6 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 
-// --- Новые методы ---
-void WebAdminManager::checkApiTimeout() {
-    if (_isApiEnabled && (millis() - _apiEnableTime > API_ENABLE_DURATION)) {
-        _isApiEnabled = false;
-        LOG_INFO("WebAdminManager", "API access for import/export has timed out and is now disabled.");
-    }
-}
-
-void WebAdminManager::enableApi() {
-    _isApiEnabled = true;
-    _apiEnableTime = millis();
-    LOG_INFO("WebAdminManager", "API access for import/export has been enabled for 5 minutes.");
-}
-
-bool WebAdminManager::isApiEnabled() {
-    return _isApiEnabled;
-}
-
-unsigned long WebAdminManager::getApiTimeRemaining() {
-    if (!_isApiEnabled) {
-        return 0;
-    }
-    unsigned long elapsedTime = millis() - _apiEnableTime;
-    if (elapsedTime >= API_ENABLE_DURATION) {
-        return 0;
-    }
-    return (API_ENABLE_DURATION - elapsedTime) / 1000;
-}
-// --- Конец новых методов ---
-
 WebAdminManager& WebAdminManager::getInstance() {
     static WebAdminManager instance;
     return instance;

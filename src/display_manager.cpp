@@ -218,6 +218,18 @@ void DisplayManager::drawLayout(const String& serviceName, int batteryPercentage
     // Если до этого была страница "нет ключей", очищаем экран полностью
     if (_isNoItemsPageActive) {
         tft.fillScreen(_currentThemeColors->background_dark);
+        
+        // Defensive explicit clear of the code container area, sized to
+        // cover the largest possible border drawn there ("no keys" page:
+        // 180x70) plus margin — guards against any residual pixels from
+        // a concurrent draw (AsyncWebServer import callback vs main loop)
+        // regardless of root cause.
+        int clearWidth = 200;
+        int clearHeight = 90;
+        int clearX = (tft.width() - clearWidth) / 2;
+        int clearY = (tft.height() - clearHeight) / 2;
+        tft.fillRect(clearX, clearY, clearWidth, clearHeight, _currentThemeColors->background_dark);
+        
         _isNoItemsPageActive = false;
     } else if (_isKeySwitched) {
         // Иначе, если ключ был переключен, очищаем только область под заголовком
@@ -670,8 +682,17 @@ void DisplayManager::updateTOTPCode(const String& code, int timeRemaining, int p
         int shadowOffset = 2;
         int barCornerRadius = 5;
 
-        // Очищаем область прогресс-бара
-        tft.fillRect(barX - shadowOffset, barY - shadowOffset, barWidth + 40 + shadowOffset, barHeight + shadowOffset * 2, _currentThemeColors->background_dark);
+        // Очищаем всю строку по ширине экрана, чтобы гарантированно стереть
+        // текст "HOTP - Static Code" (MC_DATUM, центр экрана), который шире зоны бара
+        // Увеличиваем высоту зоны очистки под реальную высоту текста (textSize=2 → ~16px)
+        const int hotpTextHeight = 16; // textSize(2) glyph height in TFT_eSPI default font
+        const int clearMargin = 4;     // safety margin above/below to fully erase any residual pixels
+        int clearTop = barY - shadowOffset - clearMargin;
+        int clearHeight = barHeight + shadowOffset * 2 + (clearMargin * 2);
+        if (clearHeight < hotpTextHeight + (clearMargin * 2)) {
+            clearHeight = hotpTextHeight + (clearMargin * 2);
+        }
+        tft.fillRect(0, clearTop, tft.width(), clearHeight, _currentThemeColors->background_dark);
         
         // Check if this is HOTP mode (timeRemaining == -1)
         if (timeRemaining == -1) {
@@ -1034,7 +1055,9 @@ void DisplayManager::drawPasswordLayout(const String& name, const String& passwo
                                         int batteryPercentage, bool isCharging,
                                         bool isWebServerOn,
                                         uint8_t strength, bool isDuplicate,
-                                        bool isPin, bool isName, bool auto_send) {
+                                        bool isPin, bool isName, bool auto_send,
+                                        bool send_login, const String& nav_mode,
+                                        bool isWildcard) {
     if (_isNoItemsPageActive) {
         _isNoItemsPageActive = false;
         tft.fillScreen(_currentThemeColors->background_dark); 
@@ -1091,10 +1114,12 @@ void DisplayManager::drawPasswordLayout(const String& name, const String& passwo
         if (isPin)        elems++;
         if (isName)       elems++;
         if (auto_send)     elems++;
+        if (send_login)    elems++;
+        if (isWildcard)    elems++;
         
         int totalW = 0;
         if (strength > 0) totalW += lockW;
-        int badgeCount = (isDuplicate?1:0) + (isPin?1:0) + (isName?1:0) + (auto_send?1:0);
+        int badgeCount = (isDuplicate?1:0) + (isPin?1:0) + (isName?1:0) + (auto_send?1:0) + (send_login?1:0) + (isWildcard?1:0);
         totalW += badgeCount * badgeW;
         if (elems > 1) totalW += (elems - 1) * gap;
         
@@ -1118,6 +1143,15 @@ void DisplayManager::drawPasswordLayout(const String& name, const String& passwo
         }
         if (auto_send) {
             drawTextBadge(curX, rowY - 6, "ENT", 0x07E0); // green
+            curX += badgeW + gap;
+        }
+        if (send_login) {
+            const char* loginBadgeText = (nav_mode == "tab") ? "L/T" : "L/E";
+            drawTextBadge(curX, rowY - 6, loginBadgeText, 0x07FF); // cyan
+            curX += badgeW + gap;
+        }
+        if (isWildcard) {
+            drawTextBadge(curX, rowY - 6, "RND", 0xF81F); // magenta
         }
     }
 
@@ -1133,31 +1167,46 @@ void DisplayManager::drawBleInitLoader(int progress) {
 }
 
 #ifdef BOARD_HAS_USB_HID
-void DisplayManager::drawUsbHidPage(const String& passwordName, const String& status) {
+void DisplayManager::drawUsbHidPage(const String& passwordName, const String& status, 
+                                     const String& login, bool sendLogin) {
     // Full redraw every time — same as drawBleConfirmPage, no caching
     tft.fillScreen(_currentThemeColors->background_dark);
     tft.setTextDatum(MC_DATUM);
     
-    // Password name at top — same as BLE confirm
+    // Password name at top (y=15)
     tft.setTextSize(1);
     tft.setTextColor(_currentThemeColors->text_secondary);
     String displayName = passwordName.length() > 20
         ? passwordName.substring(0, 20) + "..." : passwordName;
     tft.drawString(displayName, tft.width() / 2, 15);
     
-    // Center label
+    // Common offset for centered elements ("USB HID" label + status)
+    int centerOffsetY = (sendLogin && login.length() > 0) ? (tft.height() * 0.07) : 0; // shift down only when login is actually shown, otherwise keep original position
+    
+    // Login in the middle (if send_login is active)
+    // Y-coordinate: between name (y=15) and "USB HID" (y=height/2-5+centerOffsetY)
+    // Calculation: 15 + (height/2 - 5 + centerOffsetY - 15) / 2
+    if (sendLogin && login.length() > 0) {
+        tft.setTextSize(1);
+        tft.setTextColor(_currentThemeColors->text_secondary);
+        String loginText = login.length() > 20 ? login.substring(0, 20) + "..." : login;
+        int loginY = 15 + (tft.height() / 2 - 5 + centerOffsetY - 15) / 2; // Midpoint between name and "USB HID"
+        tft.drawString(loginText, tft.width() / 2, loginY);
+    }
+    
+    // Center label (y=height/2-5+centerOffsetY)
     tft.setTextSize(2);
     tft.setTextColor(_currentThemeColors->text_primary);
-    tft.drawString("USB HID", tft.width() / 2, tft.height() / 2 - 5);
+    tft.drawString("USB HID", tft.width() / 2, tft.height() / 2 - 5 + centerOffsetY);
     
-    // Status line — same position as "BLE Connected"
+    // Status line (y=height/2+20+centerOffsetY)
     bool isReady = (status == "USB Connected");
     tft.setTextSize(1);
     tft.setTextColor(isReady ? _currentThemeColors->accent_primary
                               : _currentThemeColors->text_secondary);
-    tft.drawString(status, tft.width() / 2, tft.height() / 2 + 20);
+    tft.drawString(status, tft.width() / 2, tft.height() / 2 + 20 + centerOffsetY);
     
-    // Button hints — same as BLE confirm
+    // Button hints (y=height-10)
     tft.setTextSize(1);
     tft.setTextColor(_currentThemeColors->text_secondary);
     tft.setTextDatum(TL_DATUM);
@@ -1370,7 +1419,7 @@ void DisplayManager::drawBleAdvertisingPage(const String& deviceName, const Stri
     tft.drawString("Back", 30, tft.height() - 20);
 }
 
-void DisplayManager::drawBleConfirmPage(const String& passwordName, const String& password, const String& deviceName) {
+void DisplayManager::drawBleConfirmPage(const String& passwordName, const String& password, const String& deviceName, const String& login, bool sendLogin) {
     tft.fillScreen(_currentThemeColors->background_dark);
     tft.setTextDatum(MC_DATUM);
     tft.setTextColor(_currentThemeColors->text_primary);
@@ -1384,6 +1433,17 @@ void DisplayManager::drawBleConfirmPage(const String& passwordName, const String
     }
     tft.drawString(displayName, tft.width() / 2, 15);
     
+    // Common offset for centered elements (password + status)
+    int centerOffsetY = (sendLogin && login.length() > 0) ? (tft.height() * 0.06) : 0; // shift down only when login is actually shown, otherwise keep original position
+    
+    // Login (if send_login is active) - between name and masked password
+    if (sendLogin && login.length() > 0) {
+        tft.setTextSize(1);
+        tft.setTextColor(_currentThemeColors->text_secondary);
+        String loginText = login.length() > 20 ? login.substring(0, 20) + "..." : login;
+        tft.drawString(loginText, tft.width() / 2, 15 + (tft.height() / 2 - 5 + centerOffsetY - 15) / 2);
+    }
+    
     // Замаскированный пароль в центре
     tft.setTextSize(2);
     tft.setTextColor(_currentThemeColors->text_primary);
@@ -1394,12 +1454,12 @@ void DisplayManager::drawBleConfirmPage(const String& passwordName, const String
     if (password.length() > 12) {
         maskedPassword += "...";
     }
-    tft.drawString(maskedPassword, tft.width() / 2, tft.height() / 2 - 5);
+    tft.drawString(maskedPassword, tft.width() / 2, tft.height() / 2 - 5 + centerOffsetY);
     
     // Информация об устройстве
     tft.setTextSize(1);
     tft.setTextColor(_currentThemeColors->accent_primary);
-    tft.drawString("BLE Connected", tft.width() / 2, tft.height() / 2 + 20);
+    tft.drawString("BLE Connected", tft.width() / 2, tft.height() / 2 + 20 + centerOffsetY);
 
     // Кнопки внизу
     tft.setTextSize(1);
@@ -1414,9 +1474,29 @@ void DisplayManager::drawBleConfirmPage(const String& passwordName, const String
     tft.setTextDatum(MC_DATUM);
 }
 
-void DisplayManager::drawBleSendingPage() {
+void DisplayManager::drawBleSendingPage(const String& passwordName, const String& login, bool sendLogin) {
     tft.fillScreen(_currentThemeColors->background_dark);
     tft.setTextDatum(MC_DATUM);
+    
+    // Password name at top (y=15)
+    tft.setTextSize(1);
+    tft.setTextColor(_currentThemeColors->text_secondary);
+    String displayName = passwordName.length() > 20
+        ? passwordName.substring(0, 20) + "..." : passwordName;
+    tft.drawString(displayName, tft.width() / 2, 15);
+    
+    // Login in the middle (if send_login is active)
+    // Y-coordinate: between name (y=15) and center (y=height/2)
+    // Calculation: 15 + (height/2 - 15) / 2 ≈ height/4 + 7
+    if (sendLogin && login.length() > 0) {
+        tft.setTextSize(1);
+        tft.setTextColor(_currentThemeColors->text_secondary);
+        String loginText = login.length() > 20 ? login.substring(0, 20) + "..." : login;
+        int loginY = 15 + (tft.height() / 2 - 15) / 2; // Midpoint between name and center
+        tft.drawString(loginText, tft.width() / 2, loginY);
+    }
+    
+    // "Sending..." in center
     tft.setTextColor(_currentThemeColors->text_primary);
     tft.setTextSize(2);
     tft.drawString("Sending...", tft.width() / 2, tft.height() / 2);
@@ -1628,6 +1708,7 @@ void DisplayManager::hideQRCode() {
         tft.fillScreen(_currentThemeColors->background_dark);
         _totpContainerNeedsRedraw = true;
         _isNoItemsPageActive = false; // Force redraw of empty state page after QR dismissed
+        _passwordScreenNeedsRedraw = true; // Force redraw of password screen after QR dismissed
     }
 }
 

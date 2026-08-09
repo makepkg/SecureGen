@@ -1,6 +1,7 @@
 #include "ble_keyboard_manager.h"
 #include "log_manager.h"
 #include "crypto_manager.h"
+#include "secure_utils.h"
 #include <esp_task_wdt.h>
 
 #define SECURITY_LOG(msg) Serial.println("[SEC] " + String(millis()) + ": " + msg)
@@ -402,12 +403,22 @@ void BleKeyboardManager::sendPassword(const char* password) {
         return;
     }
     
-    print(String(password));
+    String temp(password);
+    print(temp);
+    secureWipeString(temp);
 }
 
 void BleKeyboardManager::sendEnter() {
     if (!isConnected()) return;
     press(0x28); // 0x28 is HID code for Enter
+    delay(50);
+    release();
+    delay(50);
+}
+
+void BleKeyboardManager::sendTab() {
+    if (!isConnected()) return;
+    press(0x2B); // HID keycode for Tab
     delay(50);
     release();
     delay(50);

@@ -10,7 +10,6 @@ class WebAdminManager {
 public:
     static WebAdminManager& getInstance();
     void begin();
-    void checkApiTimeout(); // <-- НОВЫЙ МЕТОД
 
     bool isRegistered();
     bool registerAdmin(const String& username, const String& password);
@@ -20,11 +19,6 @@ public:
     unsigned long getLockoutTimeRemaining();
     void handleFailedLoginAttempt();
     void resetLoginAttempts();
-
-    // <-- НОВЫЕ ПУБЛИЧНЫЕ МЕТОДЫ ДЛЯ API
-    void enableApi();
-    bool isApiEnabled();
-    unsigned long getApiTimeRemaining();
 
 private:
     WebAdminManager();
@@ -36,11 +30,6 @@ private:
     String _username;
     int _failed_attempts;
     unsigned long _lockout_until;
-
-    // <-- НОВЫЕ ПРИВАТНЫЕ ПЕРЕМЕННЫЕ
-    bool _isApiEnabled = false;
-    unsigned long _apiEnableTime = 0;
-    static const unsigned long API_ENABLE_DURATION = 5 * 60 * 1000; // 5 минут
 
     // Приватные методы
     void loadCredentials();

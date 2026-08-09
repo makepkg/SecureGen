@@ -765,6 +765,80 @@
       <p>When enabled, the device automatically presses <kbd>Enter</kbd> after typing the password via BLE or USB HID keyboard. Useful for login forms where the password field is the last input. Enable only when the target application expects Enter to submit — in other contexts it may trigger unintended actions.</p>
       <p>The badge <code>ENT</code> appears on the device screen when a password has Auto-Send enabled.</p>
 
+      <h4>Send Login Before Password</h4>
+      <p>When enabled, the device types the login username first, then presses <kbd>Tab</kbd> or <kbd>Enter</kbd> (configurable), waits a short delay, and finally types the password. Useful for login forms that require both fields filled automatically.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Option</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>Login</td><td>The username or email to type before the password</td></tr>
+            <tr><td>Navigation mode</td><td><strong>Enter</strong> — press Enter after typing login (moves to next screen or submits). <strong>Tab</strong> — press Tab after typing login (moves to next field, e.g., password field on same page).</td></tr>
+            <tr><td>Delay before password (ms)</td><td>Wait time in milliseconds after pressing Tab/Enter before typing the password. Default: 300 ms. Only relevant in Enter mode. Adjust if the target application needs more time to load the next screen.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The badge <code>LOGIN ⏎</code> (Enter mode) or <code>LOGIN ⇥</code> (Tab mode) appears on the device screen and in the web cabinet when a password has Send Login enabled.</p>
+
+      <div class="callout callout-warn">
+        <strong>Navigation Mode</strong>
+        Use <strong>Tab</strong> for single-page forms where username and password fields are on the same screen.
+        Use <strong>Enter</strong> for multi-step login flows where the username screen is separate from the password screen — in this case, increase the delay if the next page is slow to load.
+      </div>
+
+      <h4>Wildcard Passwords (Random On-Device Generation)</h4>
+      <p>A wildcard password is a special entry type that generates a cryptographically random password on-device each time it's typed via HID keyboard. The generated password never appears in the web interface and is never stored — it exists only during the moment of typing.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Property</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>Entry Name</td><td>Always shown as <code>random</code> (system-managed, cannot be changed)</td></tr>
+            <tr><td>Password Field</td><td>Shows placeholder <code>[wildcard]</code> — the real password is generated during HID transmission only</td></tr>
+            <tr><td>Length</td><td>Configurable from 4 to 64 characters (Edit → Wildcard Password Length)</td></tr>
+            <tr><td>Character Set</td><td>Alphanumeric + symbols (A-Z, a-z, 0-9, !@#$%^&*()_+-=[]{}|;:,.<>?)</td></tr>
+            <tr><td>Categories</td><td>Not available for wildcard entries</td></tr>
+            <tr><td>Auto-Send / Login</td><td>Not available for wildcard entries</td></tr>
+            <tr><td>Copy Button</td><td>Disabled — wildcard passwords cannot be copied or viewed</td></tr>
+            <tr><td>Device Badge</td><td>🎲 <code>RND</code> badge (magenta) appears on screen</td></tr>
+            <tr><td>Web Badge</td><td>🎲 <code>Wildcard</code> badge appears in web cabinet</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><strong>Use cases:</strong></p>
+      <ul>
+        <li><strong>Password rotation under pressure</strong> — when you need to change a password immediately (e.g., security breach, forced reset, suspicious activity) but don't have time to think of a strong one. The device generates a cryptographically random password on-the-fly.</li>
+        <li>High-security accounts where you want maximum entropy without ever exposing the password to any interface</li>
+        <li>Services that don't support password managers (e.g., gaming consoles, smart TVs, set-top boxes)</li>
+        <li>Accounts where you prefer cryptographic randomness over memorability</li>
+        <li>Temporary access credentials that change frequently</li>
+      </ul>
+
+      <p><strong>To add a wildcard password:</strong></p>
+      <ol class="steps">
+        <li>In the Add Password form, check the <strong>Password Wildcard</strong> checkbox</li>
+        <li>Set the desired length (default: 16)</li>
+        <li>Click <strong>Add Password</strong></li>
+        <li>The entry appears with name <code>random</code> and a 🎲 badge</li>
+      </ol>
+
+      <div class="callout callout-info">
+        <strong>Singleton Constraint</strong>
+        Only one wildcard password can exist in the vault at a time. If you try to create a second one, an error message appears. Delete the existing wildcard entry before creating a new one.
+      </div>
+
+      <div class="callout callout-warn">
+        <strong>Editing Wildcard Passwords</strong>
+        You can only change the <strong>length</strong> (Edit → Wildcard Password Length). All other fields (name, password value, category, auto-send, login) are locked. To "edit" other properties, delete the wildcard entry and create a new regular password instead.
+      </div>
+
+      <div class="callout callout-danger">
+        <strong>Important</strong>
+        Since wildcard passwords are generated fresh each time, you cannot use them for accounts where you need to log in through the web interface or type the password manually. They work only via HID typing from the device. If you lose the device or wipe it, you cannot recover the wildcard password — reset the account through the service's password recovery flow.
+      </div>
+
       <h3>Password Actions</h3>
       <div class="table-wrap">
         <table>
@@ -878,6 +952,7 @@
             <tr><td>Behaviour</td><td>Device displays <strong>PIN OK</strong> — indistinguishable from normal unlock — then silently erases all data and restarts.</td></tr>
             <tr><td>Storage</td><td>Stored as a separate PBKDF2-HMAC-SHA256 hash. Never stored in plaintext.</td></tr>
             <tr><td>Board support</td><td>Both T-Display ESP32 and T-Display-S3.</td></tr>
+            <tr><td>Prerequisite</td><td><strong>Startup PIN must be enabled.</strong> Duress PIN can only be triggered from the startup PIN lock screen. If the startup PIN is disabled, the Duress PIN section is greyed out, and any previously configured Duress PIN is removed automatically.</td></tr>
           </tbody>
         </table>
       </div>
@@ -916,7 +991,7 @@
       <p>The device key file holds two independent encrypted slots. Each slot is protected by its own PIN and salt. The slot that successfully decrypts determines which space loads — the other slot is never touched during that session.</p> 
  
       <div class="callout callout-info"> 
-        Hidden Space requires startup PIN to be active. If startup PIN is disabled, Hidden Space is automatically wiped — PIN entry is the only mechanism for space selection. 
+        Hidden Space requires startup PIN to be active. The startup PIN cannot be disabled while Hidden Space exists — remove Hidden Space first (which requires entering Space B's own PIN on-device), then disable the startup PIN. 
       </div> 
  
       <h3>Step 1 — Enable Hidden Space</h3> 

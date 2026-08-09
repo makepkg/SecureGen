@@ -116,7 +116,8 @@ String CryptoManager::encryptWithPassword(const String& plaintext, const String&
 String CryptoManager::decryptWithPassword(const String& encryptedJson, const String& password) {
     LOG_DEBUG("CryptoManager", "Decrypting data with user password.");
     // 🛡️ Буфер для export/import данных (может быть большой файл)
-    DynamicJsonDocument doc(2048); // 2KB для {salt, iv, ciphertext}
+    // Увеличен до 16KB для поддержки экспорта 50+ паролей (plaintext ~4KB → base64 ciphertext ~6KB + overhead)
+    DynamicJsonDocument doc(16384); // 16KB для {salt, iv, ciphertext}
     DeserializationError error = deserializeJson(doc, encryptedJson);
     if (error) {
         LOG_ERROR("CryptoManager", "Failed to parse encrypted JSON: " + String(error.c_str()));
@@ -968,6 +969,14 @@ bool CryptoManager::disablePinEncryption(const String& currentPin) {
     if (!saveDeviceKeyUnencrypted()) {
         LOG_ERROR("CryptoManager", "Failed to save unencrypted key");
         return false;
+    }
+    
+    // 3. Duress PIN is only meaningful when startup PIN entry exists on
+    //    the lock screen — with PIN disabled there is no entry point to
+    //    trigger it, so it must not be left behind as an orphan.
+    if (LittleFS.exists("/duress_pin.hash")) {
+        LittleFS.remove("/duress_pin.hash");
+        LOG_INFO("CryptoManager", "Duress PIN removed along with startup PIN");
     }
     
     LOG_INFO("CryptoManager", "PIN encryption disabled");
@@ -2224,6 +2233,11 @@ bool CryptoManager::createHiddenSpace(const String& pin) {
         LOG_ERROR("CryptoManager", "Device key not initialized");
         return false;
     }
+
+    if (!isDeviceKeyEncrypted()) {
+        LOG_ERROR("CryptoManager", "Cannot create Hidden Space: startup PIN is not enabled (device key is unencrypted)");
+        return false;
+    }
     
     // 2. Generate new random device key for space B
     uint8_t device_key_B[32];
@@ -2319,82 +2333,91 @@ bool CryptoManager::createHiddenSpace(const String& pin) {
     return true;
 }
 
-bool CryptoManager::wipeHiddenSpace() {
-    LOG_INFO("CryptoManager", "Clearing secondary slot...");
-    
-    // 1. Overwrite slot B with random data
-    uint8_t random_data[80];
-    secureRandom(random_data, 80);
-    
-    fs::File keyFile = LittleFS.open(DEVICE_KEY_FILE, "r+");
-    if (!keyFile) {
-        LOG_ERROR("CryptoManager", "Failed to open device key file for secondary slot clear");
+bool CryptoManager::removeHiddenSpaceWithPin(const String& spaceBPin) {
+    LOG_INFO("CryptoManager", "Removing hidden space (Space B PIN required)...");
+
+    if (_activeSpace != ActiveSpace::A) {
+        LOG_ERROR("CryptoManager", "removeHiddenSpaceWithPin() must be called from Space A");
         return false;
     }
-    
-    keyFile.seek(SLOT_B_OFFSET);
-    keyFile.write(random_data, 80);
-    keyFile.close();
-    
-    // 3. Delete all Space B data files (HMAC-derived paths)
-    // We must derive Space B paths using the current _deviceKey (Space B key)
-    // BEFORE we wipe it from memory
+
+    // 1. Verify the provided PIN actually unlocks Slot B, and obtain key B
+    //    into a local buffer WITHOUT touching _deviceKey/_activeSpace.
+    uint8_t device_key_B[32] = {0};
+    if (!tryDecryptSlotDry(spaceBPin, SLOT_B_OFFSET, device_key_B)) {
+        secure_memzero(device_key_B, sizeof(device_key_B));
+        LOG_ERROR("CryptoManager", "Space B PIN incorrect - hidden space NOT removed");
+        return false;
+    }
+
+    // 2. Delete the sentinel file using the CURRENT _deviceKey (Space A key),
+    //    since the sentinel is intentionally addressed via Space A's key.
+    String sentinelPath = deriveSpaceBSentinelPath();
+    if (LittleFS.exists(sentinelPath)) {
+        LittleFS.remove(sentinelPath);
+        LOG_INFO("CryptoManager", "Deleted sentinel file: " + sentinelPath);
+    }
+
+    // 3. Delete all Space B private files using the correct key (device_key_B)
     const char* logicalNames[] = {
         "keys", "passwords", "wifi", "session",
-        "ble_pin", "device_ble_pin", "duress_pin", "web_admin", "pin_config", "sentinel", "theme", "startup_mode", "hid_mode", "boot_mode"
+        "ble_pin", "device_ble_pin", "duress_pin", "web_admin", "pin_config",
+        "theme", "startup_mode", "hid_mode", "boot_mode"
     };
-    
+
     for (const char* name : logicalNames) {
         uint8_t hmac[32];
-        
-        // Compute HMAC-SHA256(deviceKey_B, logicalName) - same as initSpacePaths()
         mbedtls_md_context_t md_ctx;
         mbedtls_md_init(&md_ctx);
         mbedtls_md_setup(&md_ctx, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 1);
-        mbedtls_md_hmac_starts(&md_ctx, _deviceKey, 32);
+        mbedtls_md_hmac_starts(&md_ctx, device_key_B, 32);
         mbedtls_md_hmac_update(&md_ctx, (const uint8_t*)name, strlen(name));
         mbedtls_md_hmac_finish(&md_ctx, hmac);
         mbedtls_md_free(&md_ctx);
-        
-        // Take first 8 hex chars (4 bytes) - same as initSpacePaths()
+
         char hexBuf[9];
         snprintf(hexBuf, sizeof(hexBuf), "%02x%02x%02x%02x",
                  hmac[0], hmac[1], hmac[2], hmac[3]);
-        
-        // Build path: /<hex>.enc (or .bin for sentinel)
-        String filePath;
-        if (strcmp(name, "sentinel") == 0) {
-            filePath = String("/") + hexBuf + ".bin";
-        } else {
-            filePath = String("/") + hexBuf + ".enc";
-        }
-        
+        String filePath = String("/") + hexBuf + ".enc";
+
         if (LittleFS.exists(filePath)) {
             LittleFS.remove(filePath);
-            LOG_INFO("CryptoManager", "Deleted alternate slot file: " + filePath);
+            LOG_INFO("CryptoManager", "Deleted Space B file: " + filePath);
         }
     }
-    
-    // Also delete shared cache and network preferences
+
+    secure_memzero(device_key_B, sizeof(device_key_B));
+
+    // 4. Also delete shared cache and network preferences
     if (LittleFS.exists("/.conn_cache")) {
         LittleFS.remove("/.conn_cache");
         LOG_INFO("CryptoManager", "Deleted shared WiFi cache");
     }
-    
+
     if (LittleFS.exists(SPACE_FLAGS_FILE)) {
         LittleFS.remove(SPACE_FLAGS_FILE);
         LOG_INFO("CryptoManager", "Deleted network preferences file");
     }
-    
-    LOG_INFO("CryptoManager", "Secondary slot files cleared completely");
-    
-    // 4. Clear device key from memory and reset state
-    wipeDeviceKey();
-    _activeSpace = ActiveSpace::NONE;
+
+    // 5. Overwrite Slot B region with random data (position-based, no key needed)
+    uint8_t random_data[80];
+    secureRandom(random_data, 80);
+
+    fs::File keyFile = LittleFS.open(DEVICE_KEY_FILE, "r+");
+    if (!keyFile) {
+        LOG_ERROR("CryptoManager", "Failed to open device key file for secondary slot clear");
+        secure_memzero(random_data, sizeof(random_data));
+        return false;
+    }
+    keyFile.seek(SLOT_B_OFFSET);
+    keyFile.write(random_data, 80);
+    keyFile.close();
+    secure_memzero(random_data, sizeof(random_data));
+
     _hiddenSpaceProvisioned = false;
     _shareWifiWithHiddenSpace = false;
-    
-    LOG_INFO("CryptoManager", "Secondary slot cleared successfully");
+
+    LOG_INFO("CryptoManager", "Hidden space removed successfully");
     return true;
 }
 

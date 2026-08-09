@@ -70,6 +70,8 @@ Connects to an existing WiFi network. Full functionality.
 | Web cabinet | ❌ | ✅ | ✅ (on demand) |
 | NTP time sync | ❌ | ❌ | ✅ |
 
+**Note:** Wildcard passwords (randomly generated, marked with 🎲 **RND** badge) work identically in all modes for on-device display and HID transmission. However, they cannot be copied to clipboard or exported via web cabinet — they are designed to stay on-device only. See [Wildcard Passwords](../user/decrypt-export-guide.md#wildcard-passwords) for details.
+
 ---
 
 ## Mode Selection at Startup
@@ -120,7 +122,10 @@ determine how many spaces exist or which PIN was entered.
 
 **Constraints:** 
 - Hidden Space requires startup PIN to be active. Disabling startup PIN 
-  automatically wipes Space B (confirmed via web cabinet warning). 
+  is blocked entirely while Space B exists — the web cabinet toggle is 
+  greyed out, and the on-device flow refuses with an on-screen message. 
+  Space B must be removed first (a separate action requiring Space B's 
+  own PIN on-device) before the startup PIN can be disabled. 
 - Factory reset can only be initiated from Space A. 
 - RTC module config and time sync are shared — both spaces benefit equally 
   from a connected DS3231. 

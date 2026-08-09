@@ -172,7 +172,7 @@
 - Compatible with Google Authenticator, Microsoft Authenticator, Authy, and all RFC 6238 / RFC 4226 services
 - SHA1 / SHA256 / SHA512, 6 and 8 digit codes, 30s and 60s periods
 - HOTP counter-based codes with automatic counter increment
-- Add keys via QR code scan (camera or file), manual entry, or bulk import
+- Add keys via QR code scan (camera or file), manual entry, or bulk import (via Secure Import/Export Mode)
 - Export any key as QR code — displayed on the device screen and in the web interface
 - Encrypted storage with unique per-device key
 
@@ -181,6 +181,7 @@
 - **BLE HID keyboard** (ESP32 & S3): types passwords directly into any device, no clipboard
 - **USB HID keyboard** (S3 only): native USB connection, no pairing needed
 - PIN protection for BLE transmission
+- **Wildcard passwords**: randomly generated on-device passwords that never leave the device — ideal for accounts where you only need HID typing, not clipboard access
 - Encrypted export/import for backup and migration
 
 ### 🔒 Hidden Space
@@ -319,11 +320,11 @@ pio run -e lilygo-t-display-s3 -t upload
 - Display settings in web interface (brightness)
 
 ### Security Enhancements
-- **Export with physical presence confirmation** — export requires button press on 
-  device; ephemeral key derived on-device, never entered manually
 - Flash encryption and secure boot (optional hardening)
 - ATECC608 secure element support
 - SD Card Module Support for pin code + cryptokey unlock feature
+- ZW111 Fingerprint module support
+- Add support extra keyboard layouts for BLE send
 
 ### Cryptography
 - Migration ECDH P-256 → X25519 (~400ms → ~80ms key exchange)

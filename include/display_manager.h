@@ -23,7 +23,7 @@ public:
     void updateHeader();
     
     void drawLayout(const String& serviceName, int batteryPercentage, bool isCharging, bool isWebServerOn); 
-    void drawPasswordLayout(const String& name, const String& password, int batteryPercentage, bool isCharging, bool isWebServerOn, uint8_t strength = 0, bool isDuplicate = false, bool isPin = false, bool isName = false, bool auto_send = false);
+    void drawPasswordLayout(const String& name, const String& password, int batteryPercentage, bool isCharging, bool isWebServerOn, uint8_t strength = 0, bool isDuplicate = false, bool isPin = false, bool isName = false, bool auto_send = false, bool send_login = false, const String& nav_mode = "enter", bool isWildcard = false);
     
 
     void updateBatteryStatus(int percentage, bool isCharging);
@@ -39,7 +39,8 @@ public:
     void drawBleInitLoader(int progress);
 #ifdef BOARD_HAS_USB_HID
     bool drawHidPrompt(bool defaultIsBle);
-    void drawUsbHidPage(const String& passwordName, const String& status);
+    void drawUsbHidPage(const String& passwordName, const String& status, 
+                        const String& login, bool sendLogin);
     void resetUsbHidPage();
     void setUsbHidMode(bool active);
 private:
@@ -54,8 +55,8 @@ public:
     void eraseLoaderArea(); // Erase loader bar area and reset flags
     bool isLoaderActive() const { return _loaderActive; } // Проверить активность лоадера
     void drawBleAdvertisingPage(const String& deviceName, const String& status, int timeLeft);
-    void drawBleConfirmPage(const String& passwordName, const String& password, const String& deviceName);
-    void drawBleSendingPage();
+    void drawBleConfirmPage(const String& passwordName, const String& password, const String& deviceName, const String& login, bool sendLogin);
+    void drawBleSendingPage(const String& passwordName, const String& login, bool sendLogin);
     void drawBleResultPage(bool success);
     
     // QR Code display
@@ -64,6 +65,7 @@ public:
     bool isQRCodeActive() const { return _qrCodeActive; }
     void requestShowQRCode(const String& text, int timeoutSeconds = 30); // Thread-safe request
     void updateQRTimer(int secondsRemaining); // Update timer without full redraw
+    bool consumePasswordRedrawFlag() { bool f = _passwordScreenNeedsRedraw; _passwordScreenNeedsRedraw = false; return f; } // Test-and-clear, mirrors _totpContainerNeedsRedraw pattern
 
     void setKeySwitched(bool switched) { _isKeySwitched = switched; } // <-- ADDED
     bool isCharging() const { return _isCharging; }
@@ -126,6 +128,7 @@ private:
     unsigned long _lastScrambleFrameTime = 0;
     bool _totpContainerNeedsRedraw = true;
     bool _isKeySwitched = false;
+    bool _passwordScreenNeedsRedraw = false; // Mirrors _totpContainerNeedsRedraw for PASSWORD mode
     
     // Лоадер состояние
     bool _loaderActive = false;

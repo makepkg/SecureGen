@@ -284,9 +284,9 @@ IRAM_ATTR bool SecureLayerManager::encryptResponse(const String& clientId, const
         JsonDocument doc;
         doc["type"] = "secure";
         doc["counter"] = session->txCounter++;
-        doc["data"] = bytesToHex(ciphertext, ciphertextLen);
-        doc["iv"] = bytesToHex(iv, SECURE_GCM_IV_SIZE);
-        doc["tag"] = bytesToHex(tag, SECURE_GCM_TAG_SIZE);
+        doc["data"] = CryptoManager::getInstance().base64Encode(ciphertext, ciphertextLen);
+        doc["iv"] = CryptoManager::getInstance().base64Encode(iv, SECURE_GCM_IV_SIZE);
+        doc["tag"] = CryptoManager::getInstance().base64Encode(tag, SECURE_GCM_TAG_SIZE);
         
         serializeJson(doc, encryptedJson);
         // 📉 Убран DEBUG лог - слишком часто вызывается
@@ -342,18 +342,25 @@ IRAM_ATTR bool SecureLayerManager::decryptRequest(const String& clientId, const 
     }
     session->rxCounter = counter;
     
-    // Convert hex to binary
-    size_t dataLen = dataHex.length() / 2;
+    // Convert base64 to binary
+    std::vector<uint8_t> dataVec = CryptoManager::getInstance().base64Decode(dataHex);
+    std::vector<uint8_t> ivVec = CryptoManager::getInstance().base64Decode(ivHex);
+    std::vector<uint8_t> tagVec = CryptoManager::getInstance().base64Decode(tagHex);
+    
+    // Validate decoded sizes
+    if (dataVec.empty() || ivVec.size() != SECURE_GCM_IV_SIZE || tagVec.size() != SECURE_GCM_TAG_SIZE) {
+        return false;
+    }
+    
+    size_t dataLen = dataVec.size();
     uint8_t* ciphertext = new uint8_t[dataLen];
     uint8_t iv[SECURE_GCM_IV_SIZE];
     uint8_t tag[SECURE_GCM_TAG_SIZE];
     
-    if (!hexToBytes(dataHex, ciphertext, dataLen) ||
-        !hexToBytes(ivHex, iv, SECURE_GCM_IV_SIZE) ||
-        !hexToBytes(tagHex, tag, SECURE_GCM_TAG_SIZE)) {
-        delete[] ciphertext;
-        return false;
-    }
+    // Copy from vectors to buffers
+    memcpy(ciphertext, dataVec.data(), dataLen);
+    memcpy(iv, ivVec.data(), SECURE_GCM_IV_SIZE);
+    memcpy(tag, tagVec.data(), SECURE_GCM_TAG_SIZE);
     
     // AES-256-GCM decryption with tag authentication via mbedTLS
     uint8_t* decryptedBytes = new uint8_t[dataLen + 1];
